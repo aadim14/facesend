@@ -31,6 +31,15 @@ function canShareFiles(files: File[]): boolean {
   );
 }
 
+/**
+ * Whether this browser can hand files to the native share sheet at all.
+ * On desktop this is essentially Safari-only — Chrome/Brave/Arc on macOS
+ * report false and fall back to a zip download.
+ */
+export function fileShareSupported(): boolean {
+  return canShareFiles([new File(["x"], "probe.txt", { type: "text/plain" })]);
+}
+
 /** null = share unavailable/failed in a way the caller should fall back from. */
 async function tryShare(files: File[], title: string): Promise<ShareOutcome | null> {
   try {

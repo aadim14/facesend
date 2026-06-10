@@ -10,7 +10,7 @@ import {
   putCluster,
   resetAll,
 } from "@/lib/db";
-import { sharePersonPhotos } from "@/lib/share";
+import { fileShareSupported, sharePersonPhotos } from "@/lib/share";
 import type { ClusterRecord } from "@/types";
 
 interface PersonRow {
@@ -27,6 +27,7 @@ export default function DoneStep({ onReset }: Props) {
   const [rows, setRows] = useState<PersonRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [sharingId, setSharingId] = useState<string | null>(null);
+  const [zipFellBack, setZipFellBack] = useState(false);
   const urlsRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -67,6 +68,11 @@ export default function DoneStep({ onReset }: Props) {
     try {
       const photos = await getPhotosForCluster(row.cluster.id);
       const outcome = await sharePersonPhotos(row.cluster.name, photos);
+      // A zip download instead of the share sheet means this browser can't
+      // hand files to Messages/AirDrop — surface the Safari tip.
+      if (outcome === "downloaded" && !fileShareSupported()) {
+        setZipFellBack(true);
+      }
       if (outcome !== "cancelled" && !row.cluster.sent) {
         const updated = { ...row.cluster, sent: true };
         await putCluster(updated);
@@ -117,6 +123,15 @@ export default function DoneStep({ onReset }: Props) {
             : `${unsent} ${unsent === 1 ? "person hasn't" : "people haven't"} been shared yet — send theirs below.`}
         </p>
       </div>
+
+      {zipFellBack && (
+        <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Your photos saved as a zip — this browser can&apos;t open the share
+          sheet. Open this page in{" "}
+          <span className="font-medium">Safari</span> to send straight through
+          Messages, AirDrop, or Mail.
+        </div>
+      )}
 
       <ul className="flex flex-col gap-3">
         {rows.map((row) => (
