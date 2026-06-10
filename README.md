@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FaceSend
 
-## Getting Started
+Send event photos to the right people, automatically — entirely in your browser.
 
-First, run the development server:
+Drop up to 300 photos, FaceSend detects and groups every face locally, you tag each person once with a name and a phone or email, and it generates a private page per person containing only the photos they appear in, with a download-all button.
+
+**No server, no accounts, no paid APIs.** Face recognition runs client-side ([@vladmandic/face-api](https://github.com/vladmandic/face-api), SSD MobileNet + 128-d descriptors) and everything persists in your browser's IndexedDB.
+
+## Run it
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm test         # unit tests (clustering, validation, geometry, data layer)
+npm run build    # production build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## How it works
 
-## Learn More
+1. **Upload** — photos are imported into IndexedDB with generated thumbnails.
+2. **Detect** — each photo is downscaled to ≤800 px and run through face detection, landmarks, and descriptor extraction (~12 MB of model weights served from `public/models`).
+3. **Cluster** — greedy centroid clustering over the 128-d descriptors at a Euclidean threshold of 0.50, deliberately strict: the UI lets you merge two cards of the same person, but never has to split a bad merge.
+4. **Tag** — one card per person with sample face crops; name + phone/email, merge, or skip.
+5. **Share** — `/p/<person>` pages list only that person's photos with a streaming zip download ([client-zip](https://github.com/Touffy/client-zip)).
 
-To learn more about Next.js, take a look at the following resources:
+### v1 limitation
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Share links resolve from this browser's storage, so they only open on the device that created them. Hosting the pages so recipients can open them anywhere is the natural v2.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Stack
 
-## Deploy on Vercel
+Next.js 15 (App Router) · TypeScript · Tailwind 4 · @vladmandic/face-api 1.7.15 (pinned; models vendored) · idb · client-zip · Vitest
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The implementation plan lives in [`docs/plans/`](docs/plans/).

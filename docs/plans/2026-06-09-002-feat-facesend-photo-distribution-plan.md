@@ -1,7 +1,7 @@
 ---
 title: "feat: FaceSend — client-side event photo distribution app"
 type: feat
-status: active
+status: completed
 date: 2026-06-09
 ---
 
