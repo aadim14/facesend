@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { addPhoto, requestPersistence } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { makeThumbnail } from "@/lib/images";
@@ -11,8 +11,59 @@ interface Props {
   onComplete: () => void;
 }
 
+// Recursively walk a dropped directory entry, collecting every file inside.
+// Dropping a folder gives you an empty `dataTransfer.files`, so we read the
+// directory tree through the entries API instead.
+function readEntry(entry: FileSystemEntry): Promise<File[]> {
+  if (entry.isFile) {
+    return new Promise((resolve) => {
+      (entry as FileSystemFileEntry).file(
+        (file) => resolve([file]),
+        () => resolve([])
+      );
+    });
+  }
+  const reader = (entry as FileSystemDirectoryEntry).createReader();
+  return new Promise((resolve) => {
+    const entries: FileSystemEntry[] = [];
+    // readEntries returns at most ~100 items per call, so keep reading
+    // until it hands back an empty batch.
+    const readBatch = () => {
+      reader.readEntries(
+        (batch) => {
+          if (batch.length === 0) {
+            Promise.all(entries.map(readEntry)).then((nested) =>
+              resolve(nested.flat())
+            );
+          } else {
+            entries.push(...batch);
+            readBatch();
+          }
+        },
+        () => resolve([])
+      );
+    };
+    readBatch();
+  });
+}
+
+async function filesFromDrop(dataTransfer: DataTransfer): Promise<File[]> {
+  const items = Array.from(dataTransfer.items);
+  const entries = items
+    .map((item) => item.webkitGetAsEntry?.())
+    .filter((e): e is FileSystemEntry => e != null);
+
+  // Fall back to the flat file list if the entries API isn't available
+  // (e.g. older browsers, or items dragged out of Photos.app).
+  if (entries.length === 0) return Array.from(dataTransfer.files);
+
+  const nested = await Promise.all(entries.map(readEntry));
+  return nested.flat();
+}
+
 export default function UploadStep({ onComplete }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   // Photos.app images aren't reachable through the file picker on most
   // macOS setups, but dragging a selection out of Photos works everywhere.
   const isMac =
@@ -21,6 +72,17 @@ export default function UploadStep({ onComplete }: Props) {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [notice, setNotice] = useState<string | null>(null);
+
+  // `webkitdirectory` is a non-standard attribute that React won't reliably
+  // render from JSX, so set it directly on the DOM node to switch the picker
+  // into folder-selection mode.
+  useEffect(() => {
+    const el = folderInputRef.current;
+    if (el) {
+      el.setAttribute("webkitdirectory", "");
+      el.setAttribute("directory", "");
+    }
+  }, []);
 
   async function handleFiles(fileList: FileList | File[]) {
     if (importing) return;
@@ -125,7 +187,7 @@ export default function UploadStep({ onComplete }: Props) {
         onDrop={(e) => {
           e.preventDefault();
           setDragActive(false);
-          handleFiles(e.dataTransfer.files);
+          filesFromDrop(e.dataTransfer).then(handleFiles);
         }}
         onClick={() => inputRef.current?.click()}
         role="button"
@@ -154,7 +216,28 @@ export default function UploadStep({ onComplete }: Props) {
         </svg>
         <p className="font-medium">Drag &amp; drop your event photos</p>
         <p className="text-sm text-neutral-400">
-          or <span className="text-accent underline underline-offset-2">browse files</span>
+          or{" "}
+          <span className="text-accent underline underline-offset-2">
+            browse files
+          </span>{" "}
+          ·{" "}
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              folderInputRef.current?.click();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation();
+                folderInputRef.current?.click();
+              }
+            }}
+            className="text-accent underline underline-offset-2"
+          >
+            a whole folder
+          </span>
         </p>
         <p className="mt-2 text-xs text-neutral-400">
           Up to {MAX_PHOTOS} photos · stays on this device
@@ -169,6 +252,18 @@ export default function UploadStep({ onComplete }: Props) {
           ref={inputRef}
           type="file"
           accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) handleFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        {/* Pulls every photo out of a chosen folder (and its subfolders).
+            The `webkitdirectory` attribute is set imperatively above. */}
+        <input
+          ref={folderInputRef}
+          type="file"
           multiple
           hidden
           onChange={(e) => {
