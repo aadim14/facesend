@@ -160,6 +160,40 @@ function addToCentroid(cluster: MutableCluster, descriptor: ArrayLike<number>) {
   }
 }
 
+/**
+ * Streaming version of pass 1 — greedy assignment with incremental
+ * centroids — exposed so the UI can show provisional person groups while
+ * photos are still processing. The final clusterDescriptors() run stays
+ * the source of truth; snapshots are provisional. Cluster creation order
+ * is stable and faceIds[0] never changes, so it works as a durable anchor
+ * for carrying user input (names) across the final re-cluster.
+ */
+export class IncrementalClusterer {
+  private clusters: MutableCluster[] = [];
+
+  constructor(private readonly threshold = CLUSTER_THRESHOLD) {}
+
+  add(face: ClusterableFace): void {
+    const { index, distance } = nearestCluster(face.descriptor, this.clusters);
+    if (index >= 0 && distance < this.threshold) {
+      addToCentroid(this.clusters[index], face.descriptor);
+      this.clusters[index].faceIds.push(face.faceId);
+    } else {
+      this.clusters.push({
+        faceIds: [face.faceId],
+        centroid: Float32Array.from(face.descriptor),
+      });
+    }
+  }
+
+  snapshot(): DescriptorCluster[] {
+    return this.clusters.map((c) => ({
+      faceIds: [...c.faceIds],
+      centroid: c.centroid,
+    }));
+  }
+}
+
 export function clusterDescriptors(
   faces: ClusterableFace[],
   threshold = CLUSTER_THRESHOLD

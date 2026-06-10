@@ -3,6 +3,7 @@ import {
   CLUSTER_THRESHOLD,
   clusterDescriptors,
   euclideanDistance,
+  IncrementalClusterer,
   smartEjectSet,
   suggestMerges,
 } from "@/lib/face/cluster";
@@ -184,5 +185,36 @@ describe("suggestMerges", () => {
       { clusterId: "empty", descriptors: [] },
     ]);
     expect(result).toHaveLength(0);
+  });
+});
+
+describe("IncrementalClusterer", () => {
+  it("groups streamed faces like pass-1 greedy assignment", () => {
+    const c = new IncrementalClusterer();
+    c.add({ faceId: "a1", descriptor: vec(0.2) });
+    c.add({ faceId: "a2", descriptor: vec(0.201) });
+    c.add({ faceId: "b1", descriptor: vec(0.8) });
+    const snap = c.snapshot();
+    expect(snap).toHaveLength(2);
+    expect(snap[0].faceIds).toEqual(["a1", "a2"]);
+    expect(snap[1].faceIds).toEqual(["b1"]);
+  });
+
+  it("keeps cluster order and anchors stable as faces stream in", () => {
+    const c = new IncrementalClusterer();
+    c.add({ faceId: "a1", descriptor: vec(0.2) });
+    c.add({ faceId: "b1", descriptor: vec(0.8) });
+    c.add({ faceId: "a2", descriptor: vec(0.199) });
+    c.add({ faceId: "b2", descriptor: vec(0.801) });
+    const snap = c.snapshot();
+    expect(snap.map((s) => s.faceIds[0])).toEqual(["a1", "b1"]);
+  });
+
+  it("snapshots are copies — later adds don't mutate them", () => {
+    const c = new IncrementalClusterer();
+    c.add({ faceId: "a1", descriptor: vec(0.2) });
+    const before = c.snapshot();
+    c.add({ faceId: "a2", descriptor: vec(0.2) });
+    expect(before[0].faceIds).toEqual(["a1"]);
   });
 });
