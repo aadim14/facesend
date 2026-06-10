@@ -8,6 +8,7 @@ import {
   replaceClusters,
   setPhotoFaceCount,
 } from "@/lib/db";
+import { newId } from "@/lib/id";
 import { getActiveBackend, loadFaceApi } from "@/lib/face/models";
 import { detectFacesInPhoto } from "@/lib/face/detect";
 import { clusterDescriptors } from "@/lib/face/cluster";
@@ -73,7 +74,7 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
           const detected = await detectFacesInPhoto(photo.blob);
           await addFaces(
             detected.map((d) => ({
-              id: crypto.randomUUID(),
+              id: newId(),
               photoId: photo.id,
               clusterId: null,
               descriptor: d.descriptor,
@@ -106,7 +107,7 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
       const assignments = new Map<string, string>();
       for (const group of grouped) {
         const record: ClusterRecord = {
-          id: crypto.randomUUID(),
+          id: newId(),
           name: "",
           contact: {},
           skipped: false,

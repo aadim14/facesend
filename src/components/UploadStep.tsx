@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { addPhoto, requestPersistence } from "@/lib/db";
+import { newId } from "@/lib/id";
 import { makeThumbnail } from "@/lib/images";
 
 const MAX_PHOTOS = 300;
@@ -45,7 +46,7 @@ export default function UploadStep({ onComplete }: Props) {
       try {
         const { thumbBlob, width, height } = await makeThumbnail(file);
         await addPhoto({
-          id: crypto.randomUUID(),
+          id: newId(),
           name: file.name,
           blob: file,
           thumbBlob,
@@ -54,7 +55,8 @@ export default function UploadStep({ onComplete }: Props) {
           faceCount: -1,
         });
         imported++;
-      } catch {
+      } catch (err) {
+        console.warn(`[facesend] couldn't import ${file.name}:`, err);
         unreadable++;
       }
       setProgress({ done: imported + unreadable, total: kept.length });
