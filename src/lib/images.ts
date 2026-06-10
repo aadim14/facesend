@@ -104,12 +104,12 @@ export async function makeThumbnail(
   }
 }
 
-/** Draw a region of a bitmap to a JPEG Blob, output capped to a max long edge. */
-export async function cropToBlob(
+/** Draw a region of a bitmap to a canvas, output capped to a max long edge. */
+export function cropToCanvas(
   bitmap: ImageBitmap,
   box: FaceBox,
   maxEdge = 320
-): Promise<Blob> {
+): HTMLCanvasElement {
   const fitted = fitWithin(box.w, box.h, maxEdge);
   const canvas = document.createElement("canvas");
   canvas.width = fitted.width;
@@ -127,5 +127,14 @@ export async function cropToBlob(
     fitted.width,
     fitted.height
   );
-  return canvasToBlob(canvas, "image/jpeg", 0.85);
+  return canvas;
+}
+
+/** Draw a region of a bitmap to a JPEG Blob, output capped to a max long edge. */
+export async function cropToBlob(
+  bitmap: ImageBitmap,
+  box: FaceBox,
+  maxEdge = 320
+): Promise<Blob> {
+  return canvasToBlob(cropToCanvas(bitmap, box, maxEdge), "image/jpeg", 0.85);
 }

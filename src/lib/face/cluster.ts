@@ -5,12 +5,14 @@
  * centroids ended up within the threshold and re-assigns every face to its
  * nearest final centroid. Deterministic for a given input order.
  *
- * 0.50 is deliberately stricter than the canonical 0.6 same-person threshold:
+ * 0.45 is deliberately stricter than the canonical 0.6 same-person threshold:
  * the UI can merge clusters but cannot split them, so under-merging is the
- * recoverable failure mode.
+ * recoverable failure mode. Dim, blurry event photos compress the distance
+ * between different people, which is also why descriptors are computed from
+ * high-res chips (see detect.ts) rather than the downscaled frame.
  */
 
-export const CLUSTER_THRESHOLD = 0.5;
+export const CLUSTER_THRESHOLD = 0.45;
 
 export interface ClusterableFace {
   faceId: string;
