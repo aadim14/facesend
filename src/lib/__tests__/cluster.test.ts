@@ -3,6 +3,7 @@ import {
   CLUSTER_THRESHOLD,
   clusterDescriptors,
   euclideanDistance,
+  smartEjectSet,
 } from "@/lib/face/cluster";
 
 /** 128-d vector with every component set to `value`. */
@@ -82,5 +83,59 @@ describe("clusterDescriptors", () => {
   it("uses a stricter-than-canonical default threshold", () => {
     expect(CLUSTER_THRESHOLD).toBeLessThanOrEqual(0.55);
     expect(CLUSTER_THRESHOLD).toBeGreaterThanOrEqual(0.4);
+  });
+});
+
+describe("smartEjectSet", () => {
+  // Person A sits near 0.2, person B (the wrong merge) near 0.8.
+  const personA = (id: string, jitter = 0) => ({
+    faceId: id,
+    descriptor: vec(0.2 + jitter),
+  });
+  const personB = (id: string, jitter = 0) => ({
+    faceId: id,
+    descriptor: vec(0.8 + jitter),
+  });
+
+  it("returns empty for an unknown seed face", () => {
+    expect(smartEjectSet([personA("a1")], "nope")).toEqual([]);
+  });
+
+  it("returns just the seed for a single-face cluster", () => {
+    expect(smartEjectSet([personA("a1")], "a1")).toEqual(["a1"]);
+  });
+
+  it("ejects only the outlier from a 3-same + 1-different cluster", () => {
+    const faces = [personA("a1"), personA("a2", 0.001), personA("a3", -0.001), personB("b1")];
+    expect(smartEjectSet(faces, "b1").sort()).toEqual(["b1"]);
+  });
+
+  it("pulls a second photo of the wrong person out with the tapped one", () => {
+    const faces = [
+      personA("a1"),
+      personA("a2", 0.002),
+      personB("b1"),
+      personB("b2", 0.003),
+    ];
+    expect(smartEjectSet(faces, "b1").sort()).toEqual(["b1", "b2"]);
+  });
+
+  it("never ejects the entire cluster", () => {
+    const faces = [personB("b1"), personB("b2", 0.001), personB("b3", 0.002)];
+    const ejected = smartEjectSet(faces, "b1");
+    expect(ejected.length).toBeLessThan(faces.length);
+    expect(ejected).toContain("b1");
+  });
+
+  it("does not drag along faces of the people staying behind", () => {
+    const faces = [
+      personA("a1"),
+      personA("a2", 0.001),
+      personA("a3", 0.002),
+      personA("a4", -0.002),
+      personB("b1"),
+    ];
+    const ejected = smartEjectSet(faces, "b1");
+    expect(ejected).toEqual(["b1"]);
   });
 });

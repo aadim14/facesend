@@ -162,6 +162,30 @@ export async function mergeClusters(
   await tx.done;
 }
 
+/**
+ * Split faces out of a cluster into a fresh one: create the new cluster,
+ * re-point the given faces. Single transaction so a crash can't leave the
+ * new cluster empty or faces pointing at a cluster that was never created.
+ */
+export async function splitCluster(
+  sourceClusterId: string,
+  faceIds: string[],
+  newCluster: ClusterRecord
+): Promise<void> {
+  if (faceIds.length === 0) return;
+  const db = await getDB();
+  const tx = db.transaction(["clusters", "faces"], "readwrite");
+  tx.objectStore("clusters").put(newCluster);
+  const faceStore = tx.objectStore("faces");
+  for (const id of faceIds) {
+    const face = await faceStore.get(id);
+    if (face && face.clusterId === sourceClusterId) {
+      faceStore.put({ ...face, clusterId: newCluster.id });
+    }
+  }
+  await tx.done;
+}
+
 // ---- derived reads ----
 
 /** Distinct photos containing a person, each photo once even with multiple matched faces. */

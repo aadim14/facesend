@@ -36,6 +36,57 @@ export function euclideanDistance(
   return Math.sqrt(sum);
 }
 
+export function meanDescriptor(
+  descriptors: ArrayLike<number>[]
+): Float32Array {
+  const out = new Float32Array(descriptors[0].length);
+  for (const d of descriptors) {
+    for (let i = 0; i < out.length; i++) out[i] += d[i];
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= descriptors.length;
+  return out;
+}
+
+/**
+ * Faces to pull out of a cluster when the host taps one face as "not this
+ * person". The tapped face always ejects; any other face that sits closer
+ * to the tapped face than to the centroid of the faces staying behind
+ * ejects with it (the wrong person often appears in several photos).
+ * At least one face always stays — ejecting an entire cluster is a no-op
+ * the caller should treat as "tapped face only".
+ */
+export function smartEjectSet(
+  faces: ClusterableFace[],
+  seedFaceId: string
+): string[] {
+  const seed = faces.find((f) => f.faceId === seedFaceId);
+  if (!seed) return [];
+  if (faces.length < 2) return [seedFaceId];
+
+  const eject = new Set([seedFaceId]);
+  // Nearest-to-seed first, so a second photo of the wrong person joins the
+  // eject set before borderline faces are judged against a shrunken "rest".
+  const candidates = faces
+    .filter((f) => f.faceId !== seedFaceId)
+    .sort(
+      (a, b) =>
+        euclideanDistance(a.descriptor, seed.descriptor) -
+        euclideanDistance(b.descriptor, seed.descriptor)
+    );
+
+  for (const candidate of candidates) {
+    if (eject.size >= faces.length - 1) break; // someone must stay
+    const staying = faces.filter(
+      (f) => !eject.has(f.faceId) && f.faceId !== candidate.faceId
+    );
+    const stayCentroid = meanDescriptor(staying.map((f) => f.descriptor));
+    const toSeed = euclideanDistance(candidate.descriptor, seed.descriptor);
+    const toStay = euclideanDistance(candidate.descriptor, stayCentroid);
+    if (toSeed < toStay) eject.add(candidate.faceId);
+  }
+  return [...eject];
+}
+
 interface MutableCluster {
   faceIds: string[];
   centroid: Float32Array;

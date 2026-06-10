@@ -7,18 +7,23 @@ import {
   getAllFaces,
   getAllPhotos,
   getClusters,
+  getFacesForCluster,
   getPhotosForCluster,
   mergeClusters,
   putCluster,
   resetAll,
+  splitCluster,
 } from "@/lib/db";
+import { smartEjectSet } from "@/lib/face/cluster";
+import { newId } from "@/lib/id";
 import { sharePersonPhotos } from "@/lib/share";
 import PersonCard from "@/components/PersonCard";
 import type { ClusterRecord, PhotoRecord } from "@/types";
 
 interface PersonView {
   cluster: ClusterRecord;
-  cropUrls: string[];
+  crops: { faceId: string; url: string }[];
+  faceCount: number;
   photoCount: number;
 }
 
@@ -62,12 +67,12 @@ export default function ReviewStep({ onSent }: Props) {
       .map((cluster) => {
         const clusterFaces = byCluster.get(cluster.id) ?? [];
         const photoCount = new Set(clusterFaces.map((f) => f.photoId)).size;
-        const cropUrls = clusterFaces.slice(0, 4).map((f) => {
+        const crops = clusterFaces.slice(0, 4).map((f) => {
           const url = URL.createObjectURL(f.cropBlob);
           urlsRef.current.push(url);
-          return url;
+          return { faceId: f.id, url };
         });
-        return { cluster, cropUrls, photoCount };
+        return { cluster, crops, faceCount: clusterFaces.length, photoCount };
       })
       .filter((v) => v.photoCount > 0)
       .sort((a, b) => b.photoCount - a.photoCount);
@@ -136,6 +141,24 @@ export default function ReviewStep({ onSent }: Props) {
     await mergeClusters(target, rest);
     setMergeMode(false);
     setSelected([]);
+    await load();
+  }
+
+  async function ejectFace(view: PersonView, faceId: string) {
+    const faces = await getFacesForCluster(view.cluster.id);
+    if (faces.length < 2) return; // nothing to split from
+    const ejectIds = smartEjectSet(
+      faces.map((f) => ({ faceId: f.id, descriptor: f.descriptor })),
+      faceId
+    );
+    if (ejectIds.length === 0) return;
+    await splitCluster(view.cluster.id, ejectIds, {
+      id: newId(),
+      name: "",
+      contact: {},
+      skipped: false,
+      sent: false,
+    });
     await load();
   }
 
@@ -244,12 +267,13 @@ export default function ReviewStep({ onSent }: Props) {
         {people.map((view) => (
           <PersonCard
             key={view.cluster.id}
-            cropUrls={view.cropUrls}
+            crops={view.crops}
             photoCount={view.photoCount}
             name={names[view.cluster.id] ?? ""}
             skipped={view.cluster.skipped}
             sent={view.cluster.sent}
             sharing={sharingId === view.cluster.id}
+            canEject={view.faceCount >= 2}
             mergeMode={mergeMode}
             selected={selected.includes(view.cluster.id)}
             onChange={(value) => updateName(view.cluster.id, value)}
@@ -257,6 +281,7 @@ export default function ReviewStep({ onSent }: Props) {
             onToggleSkip={() => toggleSkip(view)}
             onToggleSelect={() => toggleSelect(view.cluster.id)}
             onShare={() => share(view)}
+            onEjectFace={(faceId) => ejectFace(view, faceId)}
           />
         ))}
       </div>

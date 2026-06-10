@@ -15,6 +15,7 @@ import {
   replaceClusters,
   resetAll,
   setStep,
+  splitCluster,
 } from "@/lib/db";
 import type { ClusterRecord, FaceRecord, PhotoRecord } from "@/types";
 
@@ -131,5 +132,36 @@ describe("resetAll", () => {
     expect(await getAllFaces()).toHaveLength(0);
     expect(await getClusters()).toHaveLength(0);
     expect(await getStep()).toBe("upload");
+  });
+});
+
+describe("splitCluster", () => {
+  it("moves the given faces into the new cluster and keeps the rest", async () => {
+    await addPhoto(makePhoto("p1"));
+    await addPhoto(makePhoto("p2"));
+    await addFaces([
+      makeFace("f1", "p1", "c1"),
+      makeFace("f2", "p1", "c1"),
+      makeFace("f3", "p2", "c1"),
+    ]);
+    await putCluster(makeCluster("c1"));
+
+    await splitCluster("c1", ["f3"], makeCluster("c2"));
+
+    expect((await getFacesForCluster("c1")).map((f) => f.id).sort()).toEqual(["f1", "f2"]);
+    expect((await getFacesForCluster("c2")).map((f) => f.id)).toEqual(["f3"]);
+    expect(await getCluster("c2")).toBeDefined();
+  });
+
+  it("ignores faces that belong to a different cluster", async () => {
+    await addPhoto(makePhoto("p1"));
+    await addFaces([makeFace("f1", "p1", "c1"), makeFace("fX", "p1", "other")]);
+    await putCluster(makeCluster("c1"));
+    await putCluster(makeCluster("other"));
+
+    await splitCluster("c1", ["fX"], makeCluster("c2"));
+
+    expect((await getFacesForCluster("other")).map((f) => f.id)).toEqual(["fX"]);
+    expect(await getFacesForCluster("c2")).toHaveLength(0);
   });
 });

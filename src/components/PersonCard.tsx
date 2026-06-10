@@ -2,13 +2,21 @@
 
 /* eslint-disable @next/next/no-img-element -- thumbnails are blob object URLs */
 
+import { useState } from "react";
+
+interface FaceCrop {
+  faceId: string;
+  url: string;
+}
+
 interface Props {
-  cropUrls: string[];
+  crops: FaceCrop[];
   photoCount: number;
   name: string;
   skipped: boolean;
   sent: boolean;
   sharing: boolean;
+  canEject: boolean;
   mergeMode: boolean;
   selected: boolean;
   onChange: (value: string) => void;
@@ -16,15 +24,17 @@ interface Props {
   onToggleSkip: () => void;
   onToggleSelect: () => void;
   onShare: () => void;
+  onEjectFace: (faceId: string) => void;
 }
 
 export default function PersonCard({
-  cropUrls,
+  crops,
   photoCount,
   name,
   skipped,
   sent,
   sharing,
+  canEject,
   mergeMode,
   selected,
   onChange,
@@ -32,7 +42,16 @@ export default function PersonCard({
   onToggleSkip,
   onToggleSelect,
   onShare,
+  onEjectFace,
 }: Props) {
+  const [confirmFaceId, setConfirmFaceId] = useState<string | null>(null);
+  const chipsTappable = canEject && !mergeMode && !skipped;
+
+  function tapChip(faceId: string) {
+    if (!chipsTappable) return;
+    setConfirmFaceId((current) => (current === faceId ? null : faceId));
+  }
+
   return (
     <div
       onClick={mergeMode ? onToggleSelect : undefined}
@@ -70,18 +89,60 @@ export default function PersonCard({
       )}
 
       <div className="flex items-center gap-2">
-        {cropUrls.map((url, i) => (
-          <img
-            key={i}
-            src={url}
-            alt="face"
-            className="h-14 w-14 rounded-full border border-neutral-100 object-cover"
-          />
+        {crops.map((crop) => (
+          <button
+            key={crop.faceId}
+            type="button"
+            onClick={() => tapChip(crop.faceId)}
+            disabled={!chipsTappable}
+            className={`rounded-full transition-shadow ${
+              confirmFaceId === crop.faceId
+                ? "ring-2 ring-red-400 ring-offset-1"
+                : chipsTappable
+                  ? "hover:ring-2 hover:ring-neutral-300 hover:ring-offset-1"
+                  : ""
+            }`}
+            title={chipsTappable ? "Not this person? Tap to remove" : undefined}
+          >
+            <img
+              src={crop.url}
+              alt="face"
+              className="h-14 w-14 rounded-full border border-neutral-100 object-cover"
+            />
+          </button>
         ))}
       </div>
       <p className="mt-2 text-xs text-neutral-400">
         in {photoCount} photo{photoCount === 1 ? "" : "s"}
+        {chipsTappable && !confirmFaceId && (
+          <span className="text-neutral-300"> · tap a face that doesn&apos;t belong</span>
+        )}
       </p>
+
+      {confirmFaceId && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2">
+          <span className="text-xs font-medium text-red-700">
+            Not this person?
+          </span>
+          <span className="flex gap-2">
+            <button
+              onClick={() => {
+                onEjectFace(confirmFaceId);
+                setConfirmFaceId(null);
+              }}
+              className="rounded-full bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+            >
+              Remove
+            </button>
+            <button
+              onClick={() => setConfirmFaceId(null)}
+              className="rounded-full px-2 py-1 text-xs text-red-700 hover:bg-red-100"
+            >
+              Cancel
+            </button>
+          </span>
+        </div>
+      )}
 
       <div className="mt-3 flex flex-col gap-2">
         <input
