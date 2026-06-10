@@ -4,6 +4,7 @@ import {
   clusterDescriptors,
   euclideanDistance,
   smartEjectSet,
+  suggestMerges,
 } from "@/lib/face/cluster";
 
 /** 128-d vector with every component set to `value`. */
@@ -137,5 +138,51 @@ describe("smartEjectSet", () => {
     ];
     const ejected = smartEjectSet(faces, "b1");
     expect(ejected).toEqual(["b1"]);
+  });
+});
+
+describe("suggestMerges", () => {
+  // euclidean distance between vec(a) and vec(b) over 128 dims = |a-b| * sqrt(128) ≈ |a-b| * 11.31
+  const STEP = 1 / Math.sqrt(128); // component delta that yields distance 1.0... scaled below
+
+  function group(id: string, value: number, count = 2) {
+    return {
+      clusterId: id,
+      descriptors: Array.from({ length: count }, () => vec(value)),
+    };
+  }
+
+  it("suggests pairs inside the uncertainty band", () => {
+    // distance 0.5: component delta = 0.5/sqrt(128)
+    const result = suggestMerges([group("a", 0.2), group("b", 0.2 + 0.5 * STEP)]);
+    expect(result).toHaveLength(1);
+    expect([result[0].a, result[0].b].sort()).toEqual(["a", "b"]);
+    expect(result[0].distance).toBeCloseTo(0.5, 5);
+  });
+
+  it("ignores pairs below the auto-merge threshold and beyond the same-person bound", () => {
+    const close = suggestMerges([group("a", 0.2), group("b", 0.2 + 0.3 * STEP)]);
+    const far = suggestMerges([group("a", 0.2), group("b", 0.2 + 0.7 * STEP)]);
+    expect(close).toHaveLength(0);
+    expect(far).toHaveLength(0);
+  });
+
+  it("orders multiple suggestions nearest first", () => {
+    const result = suggestMerges([
+      group("a", 0.2),
+      group("b", 0.2 + 0.58 * STEP),
+      group("c", 0.2 - 0.5 * STEP),
+    ]);
+    expect(result.length).toBeGreaterThanOrEqual(2);
+    expect(result[0].distance).toBeLessThanOrEqual(result[1].distance);
+    expect([result[0].a, result[0].b].sort()).toEqual(["a", "c"]);
+  });
+
+  it("skips clusters with no descriptors", () => {
+    const result = suggestMerges([
+      group("a", 0.2),
+      { clusterId: "empty", descriptors: [] },
+    ]);
+    expect(result).toHaveLength(0);
   });
 });

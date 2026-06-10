@@ -87,6 +87,51 @@ export function smartEjectSet(
   return [...eject];
 }
 
+/**
+ * Upper bound for "might be the same person" merge suggestions: the
+ * canonical face-recognition same-person threshold. Cluster pairs whose
+ * centroids land between CLUSTER_THRESHOLD (our deliberately strict
+ * auto-merge cutoff) and this value are exactly the under-merges the
+ * strict threshold knowingly produces.
+ */
+export const SUGGEST_THRESHOLD = 0.6;
+
+export interface MergeSuggestion {
+  a: string;
+  b: string;
+  distance: number;
+}
+
+export interface ClusterGroup {
+  clusterId: string;
+  descriptors: ArrayLike<number>[];
+}
+
+/**
+ * Cluster pairs whose centroid distance falls in the uncertainty band
+ * [min, max) — candidates for a one-tap "Same person?" review, nearest
+ * pairs first.
+ */
+export function suggestMerges(
+  groups: ClusterGroup[],
+  min = CLUSTER_THRESHOLD,
+  max = SUGGEST_THRESHOLD
+): MergeSuggestion[] {
+  const centroids = groups
+    .filter((g) => g.descriptors.length > 0)
+    .map((g) => ({ id: g.clusterId, centroid: meanDescriptor(g.descriptors) }));
+  const out: MergeSuggestion[] = [];
+  for (let i = 0; i < centroids.length; i++) {
+    for (let j = i + 1; j < centroids.length; j++) {
+      const d = euclideanDistance(centroids[i].centroid, centroids[j].centroid);
+      if (d >= min && d < max) {
+        out.push({ a: centroids[i].id, b: centroids[j].id, distance: d });
+      }
+    }
+  }
+  return out.sort((x, y) => x.distance - y.distance);
+}
+
 interface MutableCluster {
   faceIds: string[];
   centroid: Float32Array;
