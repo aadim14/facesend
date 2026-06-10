@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: FaceSend Feature Ideas</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#fafaf9; --surface:#ffffff; --ink:#1c1917; --muted:#57534e;
+    --line:#e7e5e4; --accent:#4f46e5; --accent-soft:#eef2ff; --accent-text:#3730a3;
+    --warn-soft:#fef3c7; --warn-text:#92400e; --good-soft:#dcfce7; --good-text:#166534;
+    --info-soft:#e0f2fe; --info-text:#075985; --rej-soft:#fee2e2; --rej-text:#991b1b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 Inter,-apple-system,"Segoe UI",sans-serif;}
+  .page{max-width:900px;margin-inline:auto;padding:48px 24px 64px;}
+  .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-text);font-weight:600;margin:0 0 8px;}
+  h1{font-size:30px;line-height:1.2;margin:0 0 12px;font-weight:700;}
+  h2{font-size:21px;margin:48px 0 14px;font-weight:650;border-bottom:1px solid var(--line);padding-bottom:8px;}
+  h3{font-size:17px;margin:0;font-weight:650;}
+  p{max-width:72ch;}
+  code{font:13px/1.5 "JetBrains Mono",ui-monospace,Menlo,monospace;background:#f5f5f4;padding:1px 5px;border-radius:4px;}
+  .meta{display:flex;flex-wrap:wrap;gap:18px;margin:0 0 6px;color:var(--muted);font-size:13.5px;}
+  .meta dt{display:inline;font-weight:600;color:var(--ink);}
+  .meta dd{display:inline;margin:0;}
+  .meta div{display:inline;}
+  .stats{display:flex;flex-wrap:wrap;gap:12px;margin:22px 0 0;}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 16px;min-width:110px;}
+  .stat .n{font-size:20px;font-weight:700;}
+  .stat .l{font-size:12px;color:var(--muted);}
+  .axes{list-style:none;padding:0;display:flex;flex-wrap:wrap;gap:8px;}
+  .axes li{background:var(--accent-soft);color:var(--accent-text);border-radius:999px;padding:4px 14px;font-size:13px;font-weight:500;}
+  .jump{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:0 0 26px;}
+  .jump ol{margin:6px 0 0;padding-left:22px;columns:2;column-gap:32px;}
+  .jump a{color:var(--accent-text);text-decoration:none;}
+  .jump a:hover{text-decoration:underline;}
+  article.idea{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:22px 24px;margin:0 0 22px;}
+  .idea-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
+  .rank{background:var(--accent-soft);color:var(--accent-text);font-weight:700;border-radius:999px;padding:2px 12px;font-size:13.5px;}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 14px;}
+  .chip{border-radius:999px;padding:3px 12px;font-size:12.5px;font-weight:500;}
+  .chip.axis{background:var(--info-soft);color:var(--info-text);}
+  .chip.conf{background:var(--good-soft);color:var(--good-text);}
+  .chip.cx{background:var(--warn-soft);color:var(--warn-text);}
+  .idea dl{margin:0;}
+  .idea dt{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-top:12px;}
+  .idea dd{margin:3px 0 0;max-width:76ch;}
+  .basis-tag{font-weight:600;color:var(--accent-text);}
+  figure{margin:18px 0 4px;}
+  figcaption{font-size:12.5px;color:var(--muted);margin-top:6px;}
+  table{border-collapse:collapse;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:14px;}
+  th{text-align:left;background:#f5f5f4;padding:9px 14px;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+  td{padding:9px 14px;border-top:1px solid var(--line);vertical-align:top;}
+  footer.composition-signal{margin-top:56px;border-top:1px solid var(--line);padding-top:14px;font-size:12.5px;color:var(--muted);}
+  @media (max-width:640px){.jump ol{columns:1}}
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="eyebrow">Ideation</p>
+<h1>FaceSend Feature Ideas</h1>
+<dl class="meta">
+  <div><dt>Date:</dt> <dd><time datetime="2026-06-10">2026-06-10</time></dd></div>
+  <div><dt>Topic:</dt> <dd>facesend-feature-ideas</dd></div>
+  <div><dt>Focus:</dt> <dd>10 really good feature ideas for FaceSend</dd></div>
+  <div><dt>Mode:</dt> <dd>repo-grounded</dd></div>
+</dl>
+<div class="stats">
+  <div class="stat"><div class="n">48</div><div class="l">raw ideas</div></div>
+  <div class="stat"><div class="n">6</div><div class="l">ideation frames</div></div>
+  <div class="stat"><div class="n">10</div><div class="l">survivors</div></div>
+  <div class="stat"><div class="n">5</div><div class="l">axes covered</div></div>
+</div>
+
+<section>
+<h2>Grounding Context</h2>
+<p><strong>Codebase context.</strong> FaceSend is a fully client-side photo distribution app: Next.js 15 + TypeScript, <code>@vladmandic/face-api</code> running in-browser (WebGL), IndexedDB via <code>idb</code>, <code>client-zip</code> for downloads. Flow: upload ~300 photos → sequential per-photo detection (~1s each, two-pass: 640px fast detect + 400px high-res chip descriptors) → greedy centroid clustering at threshold 0.45 (deliberately stricter than the canonical 0.6 same-person threshold, because the UI can merge but not split) → review cards (4 face chips, name + phone/email free-text, Skip, multi-select merge) → per-person <code>/p/[personId]</code> links. v1 links are <strong>local-only</strong> — they resolve from the organizer's IndexedDB, so recipients on other devices hit a dead end. No SMS/email sending, no undo; <code>replaceClusters()</code> rewrites all cluster assignments from scratch, discarding manual merges. A tap-to-eject split feature is being specified separately. Photos with zero detected faces reach no one.</p>
+<p><strong>External context.</strong> Competitors (Waldo, Premagic, Kwikpic, Pic-Time, Memzo, Fotify) lead with selfie-matching guest portals, QR codes at the venue, WhatsApp/SMS delivery, download locks, and sponsor watermarks — all server-side. <em>None markets on-device processing; FaceSend's architecture is genuine white-space.</em> Cross-domain signals: in mail-merge-shaped products the contact list is the bottleneck and the durable asset; stadium print kiosks showed delivery latency matters emotionally; Firefox Send/Excalidraw established the encrypted-blob + key-in-URL-fragment pattern for zero-trust hosting.</p>
+</section>
+
+<section>
+<h2>Topic Axes</h2>
+<ul class="axes">
+  <li>recognition accuracy &amp; correction</li>
+  <li>labeling &amp; contacts</li>
+  <li>delivery &amp; sending</li>
+  <li>recipient arrival experience</li>
+  <li>privacy &amp; trust</li>
+</ul>
+</section>
+
+<section>
+<h2>Ranked Ideas</h2>
+<nav class="jump"><strong>Jump to:</strong>
+<ol>
+  <li><a href="#i1">Doubt Queue</a></li>
+  <li><a href="#i2">Corrections Ledger</a></li>
+  <li><a href="#i3">Guest Self-Claim</a></li>
+  <li><a href="#i4">Roster Import + Contact Picker</a></li>
+  <li><a href="#i5">People Directory</a></li>
+  <li><a href="#i6">Portable Gallery Bundles</a></li>
+  <li><a href="#i7">Zero-Knowledge Photo Locker</a></li>
+  <li><a href="#i8">Photo Potluck</a></li>
+  <li><a href="#i9">Consent Shield</a></li>
+  <li><a href="#i10">Airplane-Mode Proof</a></li>
+</ol>
+</nav>
+
+<article class="idea" id="i1">
+<div class="idea-head"><span class="rank">1</span><h3>Doubt Queue — confidence-ranked correction</h3></div>
+<div class="chips"><span class="chip axis">accuracy &amp; correction</span><span class="chip conf">Confidence 90%</span><span class="chip cx">Complexity Medium</span></div>
+<dl>
+<dt>Description</dt>
+<dd>Make review time scale with model uncertainty, not photo count. After clustering, surface only what the algorithm is unsure about: cluster pairs whose centroid distance falls in the 0.45–0.60 band as one-tap "Same person?" side-by-side cards, plus a second-pass rescue sweep matching orphan singletons (and faces previously dropped for being under 48px) against the now-labeled centroids — "We found 12 more photos that look like Priya — accept / reject." The confident 95% is never shown.</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">direct:</span> <code>src/lib/face/cluster.ts</code> documents threshold 0.45 as "deliberately stricter than the canonical 0.6 same-person threshold" because under-merging is the recoverable failure mode — the system knowingly manufactures duplicates in a known distance band, and the pairwise distances needed to rank suggestions are already computed in clustering pass 2.</dd>
+<dt>Rationale</dt>
+<dd>The codebase already encodes exactly where mistakes concentrate, then throws that information away and makes the host find duplicates by eyeballing a wall of cards. This converts an O(people²) visual hunt into a 30-second yes/no queue — and it complements the smart-eject split feature being specified now (eject fixes over-merges; the queue fixes under-merges).</dd>
+<dt>Downsides</dt>
+<dd>Band tuning needed to keep suggestions useful rather than noisy; adds a step before the review grid that must be skippable.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 640 110" width="100%" role="img" aria-label="Distance band diagram">
+  <line x1="40" y1="60" x2="600" y2="60" stroke="#a8a29e" stroke-width="2"/>
+  <rect x="40" y="44" width="210" height="32" rx="6" fill="#dcfce7"/>
+  <rect x="250" y="44" width="170" height="32" rx="6" fill="#fef3c7"/>
+  <rect x="420" y="44" width="180" height="32" rx="6" fill="#fee2e2" opacity="0.55"/>
+  <text x="145" y="64" font-size="12" text-anchor="middle" fill="#166534" font-weight="600">auto-merged &lt; 0.45</text>
+  <text x="335" y="64" font-size="12" text-anchor="middle" fill="#92400e" font-weight="600">0.45–0.60 → ask the host</text>
+  <text x="510" y="64" font-size="12" text-anchor="middle" fill="#991b1b" font-weight="600">&gt; 0.60 different person</text>
+  <text x="335" y="24" font-size="12" text-anchor="middle" fill="#57534e">today this whole band becomes silent duplicate cards</text>
+  <line x1="335" y1="30" x2="335" y2="42" stroke="#57534e" stroke-width="1"/>
+</svg>
+<figcaption>The uncertainty band already exists in the code's own comments — the Doubt Queue just gives it a UI.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="i2">
+<div class="idea-head"><span class="rank">2</span><h3>Corrections Ledger — fixes that survive re-clustering</h3></div>
+<div class="chips"><span class="chip axis">accuracy &amp; correction</span><span class="chip conf">Confidence 85%</span><span class="chip cx">Complexity Medium</span></div>
+<dl>
+<dt>Description</dt>
+<dd>Record every host correction — a merge, a smart-eject, a Doubt Queue answer — as a persistent must-link / cannot-link constraint stored beside the descriptors. Any future clustering run enforces the constraints (constrained greedy clustering, COP-KMEANS-style), so re-clustering can never resurrect a mistake the host already fixed.</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">direct:</span> <code>replaceClusters()</code> in <code>src/lib/db.ts</code> clears the entire clusters store and reassigns every face from scratch — any manual merge is silently destroyed by the next clustering pass. Corrections currently live only as disposable UI state.</dd>
+<dt>Rationale</dt>
+<dd>A human judgment is the most expensive signal in the app, and today it has the shortest lifespan. The ledger is the compounding primitive every other accuracy feature sits on — and it's the hard prerequisite for "add more photos later" and for Photo Potluck (idea 8), both of which require safe re-clustering.</dd>
+<dt>Downsides</dt>
+<dd>Constraint-aware clustering is subtler than the current pure function; conflicting constraints need a resolution rule.</dd>
+</dl>
+</article>
+
+<article class="idea" id="i3">
+<div class="idea-head"><span class="rank">3</span><h3>Guest Self-Claim — selfie labeling that never leaves the device</h3></div>
+<div class="chips"><span class="chip axis">labeling &amp; contacts</span><span class="chip conf">Confidence 80%</span><span class="chip cx">Complexity Medium-High</span></div>
+<dl>
+<dt>Description</dt>
+<dd>Invert who does identification. A "Find me" kiosk mode on the host's device (or pass-the-phone): a guest taps, takes a selfie, the descriptor is computed locally and matched against cluster centroids — the same <code>euclideanDistance</code> path that already exists — and the guest types their <em>own</em> name and contact into their matched cluster. The host labels only the stragglers.</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">external:</span> Waldo, Kwikpic, and Premagic all ship selfie-matching portals as their headline guest UX — but every one uploads the selfie to their servers. FaceSend can deliver the identical interaction with the selfie never leaving the device it was taken on.</dd>
+<dt>Rationale</dt>
+<dd>Labeling is the worst-scaling step (the host must know and correctly spell ~N names and contacts, and at any event bigger than a dinner party they provably don't know everyone). Self-claim doesn't speed the bottleneck up — it deletes it, and the guest types better data about themselves than the host ever could. It turns the biggest manual cost into the biggest privacy differentiator in one feature.</dd>
+<dt>Downsides</dt>
+<dd>Adds a camera surface and a guest-facing locked mode to a host-only app; one-shot selfies in bad lighting may need a retry flow.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 640 120" width="100%" role="img" aria-label="Labeling inversion flow">
+  <rect x="20" y="18" width="280" height="84" rx="10" fill="#fee2e2" opacity="0.5"/>
+  <text x="160" y="40" font-size="12" text-anchor="middle" fill="#991b1b" font-weight="600">today: host labels everyone</text>
+  <text x="160" y="62" font-size="11.5" text-anchor="middle" fill="#57534e">host recalls 40 names,</text>
+  <text x="160" y="78" font-size="11.5" text-anchor="middle" fill="#57534e">types 40 phone numbers</text>
+  <rect x="340" y="18" width="280" height="84" rx="10" fill="#dcfce7"/>
+  <text x="480" y="40" font-size="12" text-anchor="middle" fill="#166534" font-weight="600">self-claim: guests label themselves</text>
+  <text x="480" y="62" font-size="11.5" text-anchor="middle" fill="#57534e">selfie → on-device match →</text>
+  <text x="480" y="78" font-size="11.5" text-anchor="middle" fill="#57534e">guest types own contact</text>
+  <line x1="302" y1="60" x2="336" y2="60" stroke="#57534e" stroke-width="2" marker-end="url(#ar)"/>
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#57534e"/></marker></defs>
+</svg>
+<figcaption>O(everyone) host labeling becomes O(stragglers).</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="i4">
+<div class="idea-head"><span class="rank">4</span><h3>Roster Import + Contact Picker autofill</h3></div>
+<div class="chips"><span class="chip axis">labeling &amp; contacts</span><span class="chip conf">Confidence 90%</span><span class="chip cx">Complexity Low-Medium</span></div>
+<dl>
+<dt>Description</dt>
+<dd>Let the host paste or upload the guest list they almost certainly already have (RSVP export, CSV, spreadsheet paste). Labeling becomes a type-ahead pick — contact auto-fills. On Android Chrome, add <code>navigator.contacts.select()</code> so a card is labeled from the host's real address book in one tap. Unmatched roster entries become a report no competitor offers: "no photos found for these 12 guests."</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">direct:</span> <code>src/lib/contacts.ts</code> validates only free-typed name + phone/email today; the mail-merge research frames the contact list as the bottleneck. <span class="basis-tag">external:</span> W3C Contact Picker API, shipped in Chrome/Android since v80, returns exactly the <code>{name, tel, email}</code> shape <code>ContactInfo</code> already stores.</dd>
+<dt>Rationale</dt>
+<dd>Typing 30 names and 30 phone numbers on a phone keyboard is the most error-prone, tedious moment in the flow, and the data already exists in the host's spreadsheet or contacts app. Cheapest large win in the set, and it seeds the People Directory (idea 5) for free.</dd>
+<dt>Downsides</dt>
+<dd>Contact Picker is Android-Chrome-only (iOS needs the CSV/paste path); CSV shape diversity needs forgiving parsing.</dd>
+</dl>
+</article>
+
+<article class="idea" id="i5">
+<div class="idea-head"><span class="rank">5</span><h3>People Directory — label once, recognize forever</h3></div>
+<div class="chips"><span class="chip axis">labeling &amp; contacts</span><span class="chip conf">Confidence 70%</span><span class="chip cx">Complexity Medium</span></div>
+<dl>
+<dt>Description</dt>
+<dd>A durable <code>people</code> store — name, contact, and a small set of representative descriptors per person — kept separate from per-event clusters and exempt from event reset. At the next event, fresh clusters are matched against the directory and arrive pre-labeled; the host confirms instead of typing. Each confirmed event feeds descriptors back, making future matches stronger. Per-person delete keeps it trustworthy.</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">direct:</span> descriptors are already persisted per face precisely so re-clustering never re-runs inference, and contacts are already stored per cluster — the asset exists and is currently destroyed between events by <code>resetAll()</code>.</dd>
+<dt>Rationale</dt>
+<dd>For the highest-value users — repeat hosts: clubs, leagues, schools, photographers — labeling cost drops toward zero after event one. It converts a one-off tool into a system with switching costs, and no cloud competitor can copy it while claiming the directory never left your device.</dd>
+<dt>Downsides</dt>
+<dd>Persistent biometrics raise the privacy stakes — needs explicit opt-in framing and pairs naturally with the retention controls in idea 10; browser storage eviction risk argues for pairing with an export/backup path.</dd>
+</dl>
+</article>
+
+<article class="idea" id="i6">
+<div class="idea-head"><span class="rank">6</span><h3>Portable Gallery Bundles — the link becomes a file</h3></div>
+<div class="chips"><span class="chip axis">delivery + arrival</span><span class="chip conf">Confidence 90%</span><span class="chip cx">Complexity Low-Medium</span></div>
+<dl>
+<dt>Description</dt>
+<dd>Generate each person's deliverable as a self-contained artifact: their photos plus an embedded <code>index.html</code> gallery (named header, grid, lightbox) that reproduces the share-page experience offline on any device. "Send" becomes the OS share sheet — AirDrop, WhatsApp, email attachment — via the Web Share API, which on mobile also offers save-to-camera-roll instead of a zip lost in the Files app.</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">direct:</span> the share page's not-found state literally instructs recipients to "open this link on the device that created it" — the app currently tells users to work around its own delivery mechanism — and <code>client-zip</code> already assembles per-person zips, so the bundle is an incremental change to an existing path.</dd>
+<dt>Rationale</dt>
+<dd>v1's local-only links mean FaceSend technically cannot deliver photos to anyone else's device — the core promise of a distribution app. This is the smallest-diff fix to the biggest gap, it requires no server (deepening the on-device story), and the recipient gets a gallery they own outright: no hosting, no expiry, no account.</dd>
+<dt>Downsides</dt>
+<dd>Large events produce large files (sharing-channel size limits apply); single-file HTML with base64 photos has a practical size ceiling, so zip + index.html is the safer default shape.</dd>
+</dl>
+</article>
+
+<article class="idea" id="i7">
+<div class="idea-head"><span class="rank">7</span><h3>Zero-Knowledge Photo Locker — real links, no trusted server</h3></div>
+<div class="chips"><span class="chip axis">delivery &amp; sending</span><span class="chip conf">Confidence 70%</span><span class="chip cx">Complexity High</span></div>
+<dl>
+<dt>Description</dt>
+<dd>Encrypt each person's bundle client-side (AES-GCM), upload the opaque blobs to any dumb static host (S3, Netlify, even Drive), and put the per-person decryption key in the URL <code>#fragment</code> — which browsers never send to servers. Recipients get normal-feeling links that work anywhere, while neither FaceSend nor the storage provider can see a single photo or attribute one to a person.</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">external:</span> the established end-to-end pattern of Firefox Send, Wormhole.app, and Excalidraw share links: ciphertext on a dumb server, key in the fragment, decryption purely client-side.</dd>
+<dt>Rationale</dt>
+<dd>This resolves the product's core tension — links are local-only because there's no server, but a normal server would kill the privacy identity. Fragment-key encryption is the one path to remote links that keeps the zero-trust story fully intact, and it composes with bundles (6) and self-claim (3) into a complete delivery suite. A P2P WebRTC variant (host-online-only) was considered and is noted in the rejection table as the synchronous alternative.</dd>
+<dt>Downsides</dt>
+<dd>Someone still has to host blobs (host-provided storage or a paid tier — a real product decision); upload bandwidth from the host's device; key-in-URL means anyone forwarded the link gets access, so it's privacy-from-infrastructure, not access control — pair with selfie verify (3) if gating matters.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 640 130" width="100%" role="img" aria-label="Zero-knowledge locker flow">
+  <rect x="20" y="40" width="150" height="52" rx="10" fill="#eef2ff"/>
+  <text x="95" y="62" font-size="12" text-anchor="middle" fill="#3730a3" font-weight="600">host's browser</text>
+  <text x="95" y="78" font-size="11" text-anchor="middle" fill="#57534e">encrypts per person</text>
+  <rect x="245" y="40" width="150" height="52" rx="10" fill="#f5f5f4" stroke="#d6d3d1"/>
+  <text x="320" y="62" font-size="12" text-anchor="middle" fill="#44403c" font-weight="600">any dumb host</text>
+  <text x="320" y="78" font-size="11" text-anchor="middle" fill="#57534e">sees only ciphertext</text>
+  <rect x="470" y="40" width="150" height="52" rx="10" fill="#dcfce7"/>
+  <text x="545" y="62" font-size="12" text-anchor="middle" fill="#166534" font-weight="600">recipient's browser</text>
+  <text x="545" y="78" font-size="11" text-anchor="middle" fill="#57534e">decrypts with #key</text>
+  <line x1="172" y1="66" x2="241" y2="66" stroke="#57534e" stroke-width="2" marker-end="url(#ar2)"/>
+  <line x1="397" y1="66" x2="466" y2="66" stroke="#57534e" stroke-width="2" marker-end="url(#ar2)"/>
+  <text x="320" y="118" font-size="11.5" text-anchor="middle" fill="#57534e">the key travels inside the link's #fragment — never sent to any server</text>
+  <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#57534e"/></marker></defs>
+</svg>
+<figcaption>Parcel-locker model: the operator can hold the box without being able to open it.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="i8">
+<div class="idea-head"><span class="rank">8</span><h3>Photo Potluck — recipients bring photos back</h3></div>
+<div class="chips"><span class="chip axis">arrival experience</span><span class="chip conf">Confidence 60%</span><span class="chip cx">Complexity High</span></div>
+<dl>
+<dt>Description</dt>
+<dd>After a recipient views their photos, the share surface invites a return gift: contribute their own phone photos of the event back into the pool. Contributions get face-processed and redistributed to everyone who appears in them — the share page stops being a receipt and becomes a two-way exchange.</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">reasoned:</span> the host's camera captured one vantage point while every guest's phone captured others; the people arriving at the share page are, by definition, exactly the population holding the missing photos — at the precise moment they're most engaged with the event. That is the cheapest possible acquisition of new supply.</dd>
+<dt>Rationale</dt>
+<dd>The only idea in the set that makes the product better the more it's used: each arrival can grow the pool, which triggers more deliveries, which triggers more arrivals. It is also FaceSend's only organic growth loop, since there's no server-side viral channel.</dd>
+<dt>Downsides</dt>
+<dd>Requires a working return channel (bundles/locker first) and safe append-and-recluster — which is why the Corrections Ledger (2) is a prerequisite; host moderation of contributions is needed.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 640 150" width="100%" role="img" aria-label="Potluck loop">
+  <ellipse cx="320" cy="75" rx="240" ry="58" fill="none" stroke="#d6d3d1" stroke-width="2" stroke-dasharray="6 5"/>
+  <rect x="250" y="8" width="140" height="34" rx="8" fill="#eef2ff"/>
+  <text x="320" y="30" font-size="12" text-anchor="middle" fill="#3730a3" font-weight="600">host distributes</text>
+  <rect x="500" y="58" width="120" height="34" rx="8" fill="#dcfce7"/>
+  <text x="560" y="80" font-size="12" text-anchor="middle" fill="#166534" font-weight="600">guests arrive</text>
+  <rect x="250" y="108" width="140" height="34" rx="8" fill="#fef3c7"/>
+  <text x="320" y="130" font-size="12" text-anchor="middle" fill="#92400e" font-weight="600">guests contribute</text>
+  <rect x="20" y="58" width="120" height="34" rx="8" fill="#e0f2fe"/>
+  <text x="80" y="80" font-size="12" text-anchor="middle" fill="#075985" font-weight="600">pool grows</text>
+</svg>
+<figcaption>The compounding loop: distribute → arrive → contribute → redistribute.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="i9">
+<div class="idea-head"><span class="rank">9</span><h3>Consent Shield — per-recipient bystander redaction</h3></div>
+<div class="chips"><span class="chip axis">privacy &amp; trust</span><span class="chip conf">Confidence 65%</span><span class="chip cx">Complexity Medium</span></div>
+<dl>
+<dt>Description</dt>
+<dd>Let the host mark any person "do not distribute." At delivery time, that person's faces are blurred in every <em>other</em> recipient's copies via a canvas pass — each recipient gets a personalized, consent-respecting version of the same group photo. Skipped and never-labeled clusters can optionally get the same treatment.</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">direct:</span> <code>FaceRecord.box</code> stores per-face bounding boxes in original-image pixel coordinates and <code>ClusterRecord.skipped</code> already exists — every input needed for targeted blur is in IndexedDB today.</dd>
+<dt>Rationale</dt>
+<dd>Group photos leak third parties by construction: every photo sent to person A also hands them persons B–F, who never consented. Because rendering already happens per-recipient on-device, per-copy redaction is nearly free here while being cost-prohibitive for server pipelines — the first feature competitors structurally can't match cheaply. For schools, kids' events, and GDPR-sensitive hosts, this is the purchase trigger.</dd>
+<dt>Downsides</dt>
+<dd>Re-encoding photos per recipient costs CPU and some image quality; needs a sensible default (off, per-event toggle) and a feasibility spike on throughput.</dd>
+</dl>
+</article>
+
+<article class="idea" id="i10">
+<div class="idea-head"><span class="rank">10</span><h3>Airplane-Mode Proof — make the privacy claim verifiable</h3></div>
+<div class="chips"><span class="chip axis">privacy &amp; trust</span><span class="chip conf">Confidence 85%</span><span class="chip cx">Complexity Low-Medium</span></div>
+<dl>
+<dt>Description</dt>
+<dd>Turn the architecture into a demonstrable feature: a service worker pre-caches the app and the ~12MB of models, and the UI actively invites the host to flip on airplane mode before processing — and keeps working. Add a live network meter (every outbound request itemized; should be only model fetches), and close each event with a privacy receipt: N photos, M faces, processed on this device, zero bytes uploaded — plus an optional retention sunset that auto-purges unclaimed face data after a host-set window, with the expiry date visible to recipients.</dd>
+<dt>Basis</dt>
+<dd><span class="basis-tag">direct:</span> the market research found that none of the six researched competitors markets on-device processing — identified white-space — yet nothing in FaceSend's UI surfaces the property at all today. The claim exists only in the README.</dd>
+<dt>Rationale</dt>
+<dd>A differentiator the user can't perceive doesn't differentiate. "Turn off your Wi-Fi and watch it still work" is the rare privacy claim a non-technical host can verify in five seconds, and no cloud competitor can ever copy the demo. It converts an architectural decision into the marketing headline and gives every other idea in this set its trust foundation.</dd>
+<dt>Downsides</dt>
+<dd>Service-worker caching adds update-flow complexity (stale-app traps); the network meter must be honest about model downloads to avoid undermining the claim it exists to make.</dd>
+</dl>
+</article>
+</section>
+
+<section>
+<h2>Rejection Summary</h2>
+<table>
+<thead><tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>FaceBeam — P2P WebRTC delivery (QR pairing, delivery receipts)</td><td>Strong, but requires host and recipient online simultaneously; the Locker (idea 7) covers remote delivery asynchronously — keep as a variant of 7.</td></tr>
+<tr><td>2</td><td>Prefilled <code>sms:</code>/<code>mailto:</code> send checklist</td><td>Useful but folds into the send mechanics of ideas 6/7 rather than standing alone.</td></tr>
+<tr><td>3</td><td>Selfie-gated broadcast gallery (one event link, selfie unlocks own photos)</td><td>Subsumed by combining Guest Self-Claim (3) with the Locker (7).</td></tr>
+<tr><td>4</td><td>Live Event Mode — streaming ingest during the event</td><td>The clustering engine already supports incremental ingest, but this is a large product-surface change; defer until post-event flow is solid.</td></tr>
+<tr><td>5</td><td>Label-while-processing (streaming review)</td><td>Real time-saver but an optimization of the current flow; folds into Live Event Mode whenever that lands.</td></tr>
+<tr><td>6</td><td>Personal recap reel (on-device WebCodecs video per person)</td><td>Heavy build for delight; doesn't address the core delivery gap yet.</td></tr>
+<tr><td>7</td><td>"Your People" co-appearance arrival view + favorites back-channel</td><td>Nice polish on the same surface where Photo Potluck (8) is the stronger bet.</td></tr>
+<tr><td>8</td><td>Dead-Letter Wall — crowdsourced "who is this?"</td><td>Privacy-awkward (broadcasting unidentified faces); Guest Self-Claim (3) solves the same gap consentfully.</td></tr>
+<tr><td>9</td><td>Faceless-photo routing ("Everyone" pseudo-cluster + time adjacency)</td><td>Real gap — zero-face photos currently reach no one — but just below the cut at 10; revisit alongside idea 6.</td></tr>
+<tr><td>10</td><td>Unclaimed-property sunset (biometric auto-purge)</td><td>Folded into idea 10's privacy receipt as the retention line.</td></tr>
+<tr><td>11</td><td><code>.facesend</code> event-state export format</td><td>Valuable backup/handoff infrastructure, but infra rather than a user-facing feature; pairs with idea 5 when it comes.</td></tr>
+<tr><td>12</td><td>Recipient-powered correction ("not me" flags, selfie rematch)</td><td>Depends on a working remote channel first; fold into ideas 3/8 later.</td></tr>
+</tbody>
+</table>
+</section>
+
+<footer class="composition-signal">Composed 2026-06-10 by ce-ideate (repo-grounded; 6 ideation frames over 5 topic axes; grounding: codebase scan + market research)</footer>
+</div>
+</body>
+</html>
