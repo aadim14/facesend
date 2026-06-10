@@ -9,14 +9,32 @@
 type FaceApi = typeof import("@vladmandic/face-api");
 
 let loadPromise: Promise<FaceApi> | null = null;
+let activeBackend: string | null = null;
+
+/** Which tfjs backend ended up active ("webgl" = GPU, "cpu" = very slow fallback). */
+export function getActiveBackend(): string | null {
+  return activeBackend;
+}
 
 export function loadFaceApi(): Promise<FaceApi> {
   if (!loadPromise) {
     loadPromise = (async () => {
       const faceapi = await import("@vladmandic/face-api");
-      // The fork's type defs don't surface tf.ready(); call it when present.
-      const tf = faceapi.tf as unknown as { ready?: () => Promise<void> };
+      // The fork's type defs don't surface these tf methods; call them when present.
+      const tf = faceapi.tf as unknown as {
+        setBackend?: (name: string) => Promise<boolean>;
+        getBackend?: () => string;
+        ready?: () => Promise<void>;
+      };
+      // Force the GPU backend — a silent CPU fallback is 10-50x slower.
+      try {
+        await tf.setBackend?.("webgl");
+      } catch {
+        // keep whatever backend tfjs picked
+      }
       await tf.ready?.();
+      activeBackend = tf.getBackend?.() ?? null;
+      console.info(`[facesend] tfjs backend: ${activeBackend ?? "unknown"}`);
       await Promise.all([
         faceapi.nets.ssdMobilenetv1.loadFromUri("/models"),
         faceapi.nets.faceLandmark68Net.loadFromUri("/models"),

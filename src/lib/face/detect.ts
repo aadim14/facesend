@@ -8,7 +8,7 @@ import {
 import { loadFaceApi } from "@/lib/face/models";
 
 /** Long edge the photo is downscaled to before inference. */
-const DETECT_MAX_EDGE = 800;
+const DETECT_MAX_EDGE = 640;
 const MIN_CONFIDENCE = 0.4;
 const CROP_MARGIN = 0.25;
 

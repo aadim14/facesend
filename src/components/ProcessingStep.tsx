@@ -8,7 +8,7 @@ import {
   replaceClusters,
   setPhotoFaceCount,
 } from "@/lib/db";
-import { loadFaceApi } from "@/lib/face/models";
+import { getActiveBackend, loadFaceApi } from "@/lib/face/models";
 import { detectFacesInPhoto } from "@/lib/face/detect";
 import { clusterDescriptors } from "@/lib/face/cluster";
 import type { ClusterRecord } from "@/types";
@@ -31,14 +31,19 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
   const [phase, setPhase] = useState<Phase>("models");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [facesFound, setFacesFound] = useState(0);
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
+  const [backend, setBackend] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    // The started ref (not an effect-cleanup cancel flag) guards re-entry:
+    // React StrictMode in dev runs effect → cleanup → effect on mount, and a
+    // cleanup-based cancel would kill the one allowed run right after the
+    // models load. The component only unmounts when this run advances the
+    // step, so letting the run finish is always correct.
     if (started.current) return;
     started.current = true;
-
-    let cancelled = false;
 
     (async () => {
       const photos = await getAllPhotos();
@@ -49,7 +54,7 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
 
       setPhase("models");
       await loadFaceApi();
-      if (cancelled) return;
+      setBackend(getActiveBackend());
 
       // Only photos not processed yet — a reload mid-run resumes where it left off.
       const pending = photos.filter((p) => p.faceCount === -1);
@@ -60,9 +65,10 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
       let found = (await getAllFaces()).length;
       setFacesFound(found);
 
+      const durations: number[] = [];
       for (let i = 0; i < pending.length; i++) {
-        if (cancelled) return;
         const photo = pending[i];
+        const startedAt = performance.now();
         try {
           const detected = await detectFacesInPhoto(photo.blob);
           await addFaces(
@@ -83,6 +89,12 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
           await setPhotoFaceCount(photo.id, 0);
         }
         setProgress({ done: alreadyDone + i + 1, total: photos.length });
+        // The first photo includes one-time GPU shader warm-up — exclude it
+        // from the estimate when we have better samples.
+        durations.push(performance.now() - startedAt);
+        const samples = durations.length > 1 ? durations.slice(1) : durations;
+        const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+        setEtaSeconds(Math.ceil((avg * (pending.length - i - 1)) / 1000));
       }
 
       setPhase("clustering");
@@ -104,18 +116,12 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
         for (const faceId of group.faceIds) assignments.set(faceId, record.id);
       }
       await replaceClusters(records, assignments);
-      if (!cancelled) onComplete();
+      onComplete();
     })().catch((e) => {
-      if (!cancelled) {
-        setError(
-          e instanceof Error ? e.message : "Something went wrong while processing."
-        );
-      }
+      setError(
+        e instanceof Error ? e.message : "Something went wrong while processing."
+      );
     });
-
-    return () => {
-      cancelled = true;
-    };
   }, [onComplete, onEmpty, attempt]);
 
   if (error) {
@@ -165,8 +171,23 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
       </div>
       {phase === "detecting" && (
         <p className="text-xs text-neutral-400">
-          {facesFound} face{facesFound === 1 ? "" : "s"} found so far · this can
-          take a few minutes for large batches
+          {facesFound} face{facesFound === 1 ? "" : "s"} found so far
+          {etaSeconds !== null && etaSeconds > 0 && (
+            <>
+              {" · about "}
+              {etaSeconds >= 90
+                ? `${Math.ceil(etaSeconds / 60)} min`
+                : `${etaSeconds}s`}{" "}
+              left
+            </>
+          )}
+        </p>
+      )}
+      {backend === "cpu" && (
+        <p className="max-w-sm text-xs text-amber-600">
+          No GPU acceleration available in this browser, so recognition runs
+          much slower. Chrome or Edge with hardware acceleration enabled is
+          dramatically faster.
         </p>
       )}
     </div>
