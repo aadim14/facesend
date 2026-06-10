@@ -42,8 +42,6 @@ export default function ReviewStep({ onSent }: Props) {
     { photo: PhotoRecord; url: string }[]
   >([]);
   const [names, setNames] = useState<Record<string, string>>({});
-  const [mergeMode, setMergeMode] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
   const [showNoFaces, setShowNoFaces] = useState(false);
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([]);
@@ -147,21 +145,6 @@ export default function ReviewStep({ onSent }: Props) {
     await persistCluster(view, { skipped: !view.cluster.skipped });
   }
 
-  function toggleSelect(id: string) {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
-    );
-  }
-
-  async function confirmMerge() {
-    if (selected.length < 2) return;
-    const [target, ...rest] = selected;
-    await mergeClusters(target, rest);
-    setMergeMode(false);
-    setSelected([]);
-    await load();
-  }
-
   function pairKey(s: MergeSuggestion): string {
     return [s.a, s.b].sort().join("|");
   }
@@ -251,7 +234,7 @@ export default function ReviewStep({ onSent }: Props) {
       viewById.has(s.a) &&
       viewById.has(s.b)
   );
-  const suggestion = mergeMode ? undefined : pendingSuggestions[0];
+  const suggestion = pendingSuggestions[0];
   const suggestionViews = suggestion
     ? ([viewById.get(suggestion.a)!, viewById.get(suggestion.b)!] as const)
     : null;
@@ -265,47 +248,10 @@ export default function ReviewStep({ onSent }: Props) {
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
             Share each person their photos — straight to iMessage, WhatsApp,
-            or AirDrop. Same person in two cards? Merge them.
+            or AirDrop.
           </p>
         </div>
-        {people.length >= 2 && (
-          <div className="flex gap-2">
-            {mergeMode ? (
-              <>
-                <button
-                  onClick={() => {
-                    setMergeMode(false);
-                    setSelected([]);
-                  }}
-                  className="rounded-full border border-neutral-200 px-4 py-1.5 text-sm hover:bg-neutral-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmMerge}
-                  disabled={selected.length < 2}
-                  className="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
-                >
-                  Merge {selected.length >= 2 ? `(${selected.length})` : ""}
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={() => setMergeMode(true)}
-                className="rounded-full border border-neutral-200 px-4 py-1.5 text-sm hover:bg-neutral-50"
-              >
-                Merge people
-              </button>
-            )}
-          </div>
-        )}
       </div>
-
-      {mergeMode && (
-        <p className="mb-4 rounded-xl bg-accent-soft px-4 py-2.5 text-sm text-accent">
-          Select the cards that show the same person, then tap Merge.
-        </p>
-      )}
 
       {suggestion && suggestionViews && (
         <div className="mb-5 rounded-2xl border border-accent/30 bg-accent-soft/40 p-4">
@@ -370,12 +316,9 @@ export default function ReviewStep({ onSent }: Props) {
             sent={view.cluster.sent}
             sharing={sharingId === view.cluster.id}
             canEject={view.faceCount >= 2}
-            mergeMode={mergeMode}
-            selected={selected.includes(view.cluster.id)}
             onChange={(value) => updateName(view.cluster.id, value)}
             onPersist={() => persistCluster(view)}
             onToggleSkip={() => toggleSkip(view)}
-            onToggleSelect={() => toggleSelect(view.cluster.id)}
             onShare={() => share(view)}
             onEjectFace={(faceId) => ejectFace(view, faceId)}
           />

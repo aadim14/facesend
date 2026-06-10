@@ -13,6 +13,10 @@ interface Props {
 
 export default function UploadStep({ onComplete }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  // Photos.app images aren't reachable through the file picker on most
+  // macOS setups, but dragging a selection out of Photos works everywhere.
+  const isMac =
+    typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
   const [dragActive, setDragActive] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -155,6 +159,12 @@ export default function UploadStep({ onComplete }: Props) {
         <p className="mt-2 text-xs text-neutral-400">
           Up to {MAX_PHOTOS} photos · stays on this device
         </p>
+        {isMac && (
+          <p className="mt-1 rounded-full bg-neutral-50 px-3 py-1 text-xs text-neutral-500">
+            Using the Photos app? Select your shots there and drag them
+            straight in here.
+          </p>
+        )}
         <input
           ref={inputRef}
           type="file"
