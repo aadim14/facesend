@@ -3,14 +3,20 @@
 /* eslint-disable @next/next/no-img-element -- avatars are blob object URLs */
 
 import { useEffect, useRef, useState } from "react";
-import { getAllFaces, getClusters, resetAll } from "@/lib/db";
+import {
+  getAllFaces,
+  getClusters,
+  getPhotosForCluster,
+  putCluster,
+  resetAll,
+} from "@/lib/db";
+import { sharePersonPhotos } from "@/lib/share";
 import type { ClusterRecord } from "@/types";
 
-interface PersonLink {
+interface PersonRow {
   cluster: ClusterRecord;
   avatarUrl: string | null;
   photoCount: number;
-  url: string;
 }
 
 interface Props {
@@ -18,17 +24,16 @@ interface Props {
 }
 
 export default function DoneStep({ onReset }: Props) {
-  const [links, setLinks] = useState<PersonLink[]>([]);
+  const [rows, setRows] = useState<PersonRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [sharingId, setSharingId] = useState<string | null>(null);
   const urlsRef = useRef<string[]>([]);
 
   useEffect(() => {
     (async () => {
       const [clusters, faces] = await Promise.all([getClusters(), getAllFaces()]);
-      const origin = window.location.origin;
-      const result: PersonLink[] = clusters
-        .filter((c) => c.sent && !c.skipped)
+      const result: PersonRow[] = clusters
+        .filter((c) => !c.skipped)
         .map((cluster) => {
           const clusterFaces = faces.filter((f) => f.clusterId === cluster.id);
           const photoCount = new Set(clusterFaces.map((f) => f.photoId)).size;
@@ -37,15 +42,15 @@ export default function DoneStep({ onReset }: Props) {
             avatarUrl = URL.createObjectURL(clusterFaces[0].cropBlob);
             urlsRef.current.push(avatarUrl);
           }
-          return {
-            cluster,
-            avatarUrl,
-            photoCount,
-            url: `${origin}/p/${cluster.id}`,
-          };
+          return { cluster, avatarUrl, photoCount };
         })
-        .sort((a, b) => a.cluster.name.localeCompare(b.cluster.name));
-      setLinks(result);
+        .filter((r) => r.photoCount > 0)
+        .sort(
+          (a, b) =>
+            Number(a.cluster.sent) - Number(b.cluster.sent) ||
+            a.cluster.name.localeCompare(b.cluster.name)
+        );
+      setRows(result);
       setLoading(false);
     })();
 
@@ -56,25 +61,30 @@ export default function DoneStep({ onReset }: Props) {
     };
   }, []);
 
-  async function copy(link: PersonLink) {
+  async function share(row: PersonRow) {
+    if (sharingId) return;
+    setSharingId(row.cluster.id);
     try {
-      await navigator.clipboard.writeText(link.url);
-    } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = link.url;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      textarea.remove();
+      const photos = await getPhotosForCluster(row.cluster.id);
+      const outcome = await sharePersonPhotos(row.cluster.name, photos);
+      if (outcome !== "cancelled" && !row.cluster.sent) {
+        const updated = { ...row.cluster, sent: true };
+        await putCluster(updated);
+        setRows((prev) =>
+          prev.map((r) =>
+            r.cluster.id === row.cluster.id ? { ...r, cluster: updated } : r
+          )
+        );
+      }
+    } finally {
+      setSharingId(null);
     }
-    setCopiedId(link.cluster.id);
-    setTimeout(() => setCopiedId((id) => (id === link.cluster.id ? null : id)), 2000);
   }
 
   async function startOver() {
     if (
       !window.confirm(
-        "Start over? This deletes all photos, people, and links from this browser."
+        "Start over? This deletes all photos and people from this browser."
       )
     )
       return;
@@ -90,6 +100,8 @@ export default function DoneStep({ onReset }: Props) {
     );
   }
 
+  const unsent = rows.filter((r) => !r.cluster.sent).length;
+
   return (
     <div className="py-4">
       <div className="mb-8 text-center">
@@ -97,61 +109,62 @@ export default function DoneStep({ onReset }: Props) {
           🎉
         </div>
         <h2 className="text-2xl font-semibold tracking-tight">
-          Links are ready
+          {unsent === 0 ? "Everyone has their photos" : "Almost there"}
         </h2>
         <p className="mt-2 text-sm text-neutral-500">
-          Each person gets a page with just their photos. Copy a link and send
-          it however you like.
+          {unsent === 0
+            ? "Every person's photos went out. You can share anyone's set again below."
+            : `${unsent} ${unsent === 1 ? "person hasn't" : "people haven't"} been shared yet — send theirs below.`}
         </p>
       </div>
 
       <ul className="flex flex-col gap-3">
-        {links.map((link) => (
+        {rows.map((row) => (
           <li
-            key={link.cluster.id}
+            key={row.cluster.id}
             className="flex items-center gap-3 rounded-2xl border border-neutral-200 p-3"
           >
-            {link.avatarUrl ? (
+            {row.avatarUrl ? (
               <img
-                src={link.avatarUrl}
-                alt={link.cluster.name}
+                src={row.avatarUrl}
+                alt={row.cluster.name || "person"}
                 className="h-11 w-11 shrink-0 rounded-full object-cover"
               />
             ) : (
               <span className="h-11 w-11 shrink-0 rounded-full bg-neutral-100" />
             )}
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{link.cluster.name}</p>
+              <p className="truncate text-sm font-medium">
+                {row.cluster.name || "Unnamed"}
+              </p>
               <p className="truncate text-xs text-neutral-400">
-                {link.photoCount} photo{link.photoCount === 1 ? "" : "s"} ·{" "}
-                {link.cluster.contact.email ?? link.cluster.contact.phone}
+                {row.photoCount} photo{row.photoCount === 1 ? "" : "s"}
+                {row.cluster.sent && (
+                  <span className="text-green-600"> · shared ✓</span>
+                )}
               </p>
             </div>
-            <a
-              href={link.url}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-full border border-neutral-200 px-3.5 py-1.5 text-xs font-medium hover:bg-neutral-50"
-            >
-              Open
-            </a>
             <button
-              onClick={() => copy(link)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors ${
-                copiedId === link.cluster.id
-                  ? "bg-green-50 text-green-600"
+              onClick={() => share(row)}
+              disabled={sharingId === row.cluster.id}
+              className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                row.cluster.sent
+                  ? "border border-neutral-200 hover:bg-neutral-50"
                   : "bg-accent text-white hover:opacity-90"
               }`}
             >
-              {copiedId === link.cluster.id ? "Copied ✓" : "Copy link"}
+              {sharingId === row.cluster.id
+                ? "Sharing…"
+                : row.cluster.sent
+                  ? "Share again"
+                  : "Share"}
             </button>
           </li>
         ))}
       </ul>
 
       <p className="mt-6 text-center text-xs text-neutral-400">
-        Links open on this device&apos;s browser, where the photos are stored.
-        Clearing site data removes them.
+        Photos stay in this browser only. Clearing site data removes them.
       </p>
 
       <div className="mt-10 text-center">

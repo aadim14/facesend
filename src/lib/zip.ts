@@ -47,11 +47,12 @@ interface SaveFilePickerWindow extends Window {
  * Zip the given photos (store-only — JPEGs don't recompress) and save as
  * `<person>-photos.zip`. Streams to disk where the File System Access API
  * exists; falls back to a Blob download elsewhere.
+ * Returns false when the user cancelled the save dialog.
  */
 export async function downloadAllAsZip(
   personName: string,
   entries: ZipEntry[]
-): Promise<void> {
+): Promise<boolean> {
   const { downloadZip } = await import("client-zip");
   const names = uniqueFilenames(entries.map((e) => sanitizeFilename(e.name, "photo")));
   const files = entries.map((entry, i) => ({
@@ -77,9 +78,9 @@ export async function downloadAllAsZip(
           close: () => writable.close(),
         })
       );
-      return;
+      return true;
     } catch (error) {
-      if ((error as DOMException)?.name === "AbortError") return; // user cancelled
+      if ((error as DOMException)?.name === "AbortError") return false; // user cancelled
       // fall through to the Blob path on any other picker failure
     }
   }
@@ -93,4 +94,5 @@ export async function downloadAllAsZip(
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  return true;
 }

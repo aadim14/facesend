@@ -6,30 +6,32 @@ interface Props {
   cropUrls: string[];
   photoCount: number;
   name: string;
-  contact: string;
-  error: string | null;
   skipped: boolean;
+  sent: boolean;
+  sharing: boolean;
   mergeMode: boolean;
   selected: boolean;
-  onChange: (field: "name" | "contact", value: string) => void;
+  onChange: (value: string) => void;
   onPersist: () => void;
   onToggleSkip: () => void;
   onToggleSelect: () => void;
+  onShare: () => void;
 }
 
 export default function PersonCard({
   cropUrls,
   photoCount,
   name,
-  contact,
-  error,
   skipped,
+  sent,
+  sharing,
   mergeMode,
   selected,
   onChange,
   onPersist,
   onToggleSkip,
   onToggleSelect,
+  onShare,
 }: Props) {
   return (
     <div
@@ -85,26 +87,26 @@ export default function PersonCard({
         <input
           type="text"
           value={name}
-          placeholder="Name"
+          placeholder="Name (optional)"
           disabled={skipped || mergeMode}
-          onChange={(e) => onChange("name", e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           onBlur={onPersist}
           className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none transition-colors focus:border-accent disabled:bg-neutral-50"
         />
-        <input
-          type="text"
-          value={contact}
-          placeholder="Phone or email"
-          inputMode="email"
-          disabled={skipped || mergeMode}
-          onChange={(e) => onChange("contact", e.target.value)}
-          onBlur={onPersist}
-          className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none transition-colors focus:border-accent disabled:bg-neutral-50"
-        />
+        {!mergeMode && (
+          <button
+            onClick={onShare}
+            disabled={skipped || sharing}
+            className={`w-full rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+              sent
+                ? "bg-green-50 text-green-700 hover:bg-green-100"
+                : "bg-accent text-white hover:opacity-90"
+            }`}
+          >
+            {sharing ? "Sharing…" : sent ? "Shared ✓ · Share again" : "Share photos"}
+          </button>
+        )}
       </div>
-      {error && !skipped && (
-        <p className="mt-2 text-xs text-red-500">{error}</p>
-      )}
     </div>
   );
 }

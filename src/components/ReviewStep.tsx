@@ -7,11 +7,12 @@ import {
   getAllFaces,
   getAllPhotos,
   getClusters,
+  getPhotosForCluster,
   mergeClusters,
   putCluster,
   resetAll,
 } from "@/lib/db";
-import { parseContact, validateTag } from "@/lib/contacts";
+import { sharePersonPhotos } from "@/lib/share";
 import PersonCard from "@/components/PersonCard";
 import type { ClusterRecord, PhotoRecord } from "@/types";
 
@@ -19,11 +20,6 @@ interface PersonView {
   cluster: ClusterRecord;
   cropUrls: string[];
   photoCount: number;
-}
-
-interface FormValue {
-  name: string;
-  contact: string;
 }
 
 interface Props {
@@ -36,12 +32,11 @@ export default function ReviewStep({ onSent }: Props) {
   const [noFacePhotos, setNoFacePhotos] = useState<
     { photo: PhotoRecord; url: string }[]
   >([]);
-  const [forms, setForms] = useState<Record<string, FormValue>>({});
+  const [names, setNames] = useState<Record<string, string>>({});
   const [mergeMode, setMergeMode] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
-  const [showValidation, setShowValidation] = useState(false);
   const [showNoFaces, setShowNoFaces] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [sharingId, setSharingId] = useState<string | null>(null);
   const urlsRef = useRef<string[]>([]);
 
   const load = useCallback(async () => {
@@ -87,14 +82,10 @@ export default function ReviewStep({ onSent }: Props) {
 
     setPeople(views);
     setNoFacePhotos(noFaces);
-    setForms((prev) => {
-      const next: Record<string, FormValue> = {};
+    setNames((prev) => {
+      const next: Record<string, string> = {};
       for (const view of views) {
-        next[view.cluster.id] = prev[view.cluster.id] ?? {
-          name: view.cluster.name,
-          contact:
-            view.cluster.contact.email ?? view.cluster.contact.phone ?? "",
-        };
+        next[view.cluster.id] = prev[view.cluster.id] ?? view.cluster.name;
       }
       return next;
     });
@@ -110,20 +101,15 @@ export default function ReviewStep({ onSent }: Props) {
     };
   }, [load]);
 
-  function updateForm(id: string, field: "name" | "contact", value: string) {
-    setForms((prev) => ({
-      ...prev,
-      [id]: { ...prev[id], [field]: value },
-    }));
+  function updateName(id: string, value: string) {
+    setNames((prev) => ({ ...prev, [id]: value }));
   }
 
-  async function persistForm(view: PersonView) {
-    const form = forms[view.cluster.id];
-    if (!form) return;
+  async function persistCluster(view: PersonView, patch?: Partial<ClusterRecord>) {
     const updated: ClusterRecord = {
       ...view.cluster,
-      name: form.name.trim(),
-      contact: parseContact(form.contact) ?? {},
+      name: (names[view.cluster.id] ?? view.cluster.name).trim(),
+      ...patch,
     };
     await putCluster(updated);
     setPeople((prev) =>
@@ -131,16 +117,11 @@ export default function ReviewStep({ onSent }: Props) {
         p.cluster.id === view.cluster.id ? { ...p, cluster: updated } : p
       )
     );
+    return updated;
   }
 
   async function toggleSkip(view: PersonView) {
-    const updated = { ...view.cluster, skipped: !view.cluster.skipped };
-    await putCluster(updated);
-    setPeople((prev) =>
-      prev.map((p) =>
-        p.cluster.id === view.cluster.id ? { ...p, cluster: updated } : p
-      )
-    );
+    await persistCluster(view, { skipped: !view.cluster.skipped });
   }
 
   function toggleSelect(id: string) {
@@ -158,34 +139,19 @@ export default function ReviewStep({ onSent }: Props) {
     await load();
   }
 
-  function errorFor(view: PersonView): string | null {
-    if (!showValidation) return null;
-    const form = forms[view.cluster.id];
-    const result = validateTag(form?.name ?? "", form?.contact ?? "");
-    return result.ok ? null : result.error ?? null;
-  }
-
-  async function handleSend() {
-    setShowValidation(true);
-    const active = people.filter((p) => !p.cluster.skipped);
-    if (active.length === 0) return;
-    const allValid = active.every((p) => {
-      const form = forms[p.cluster.id];
-      return validateTag(form?.name ?? "", form?.contact ?? "").ok;
-    });
-    if (!allValid) return;
-
-    setSending(true);
-    for (const view of active) {
-      const form = forms[view.cluster.id];
-      await putCluster({
-        ...view.cluster,
-        name: form.name.trim(),
-        contact: parseContact(form.contact)!,
-        sent: true,
-      });
+  async function share(view: PersonView) {
+    if (sharingId) return;
+    setSharingId(view.cluster.id);
+    try {
+      const name = (names[view.cluster.id] ?? "").trim();
+      const photos = await getPhotosForCluster(view.cluster.id);
+      const outcome = await sharePersonPhotos(name, photos);
+      if (outcome !== "cancelled") {
+        await persistCluster(view, { sent: true });
+      }
+    } finally {
+      setSharingId(null);
     }
-    onSent();
   }
 
   async function startOver() {
@@ -220,10 +186,8 @@ export default function ReviewStep({ onSent }: Props) {
     );
   }
 
-  const activeCount = people.filter((p) => !p.cluster.skipped).length;
-  const invalidCount = showValidation
-    ? people.filter((p) => !p.cluster.skipped && errorFor(p) !== null).length
-    : 0;
+  const active = people.filter((p) => !p.cluster.skipped);
+  const sharedCount = active.filter((p) => p.cluster.sent).length;
 
   return (
     <div className="pb-28">
@@ -233,7 +197,8 @@ export default function ReviewStep({ onSent }: Props) {
             {people.length} {people.length === 1 ? "person" : "people"} found
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
-            Tag each person once. Same person in two cards? Merge them.
+            Share each person their photos — straight to iMessage, WhatsApp,
+            or AirDrop. Same person in two cards? Merge them.
           </p>
         </div>
         {people.length >= 2 && (
@@ -281,16 +246,17 @@ export default function ReviewStep({ onSent }: Props) {
             key={view.cluster.id}
             cropUrls={view.cropUrls}
             photoCount={view.photoCount}
-            name={forms[view.cluster.id]?.name ?? ""}
-            contact={forms[view.cluster.id]?.contact ?? ""}
-            error={errorFor(view)}
+            name={names[view.cluster.id] ?? ""}
             skipped={view.cluster.skipped}
+            sent={view.cluster.sent}
+            sharing={sharingId === view.cluster.id}
             mergeMode={mergeMode}
             selected={selected.includes(view.cluster.id)}
-            onChange={(field, value) => updateForm(view.cluster.id, field, value)}
-            onPersist={() => persistForm(view)}
+            onChange={(value) => updateName(view.cluster.id, value)}
+            onPersist={() => persistCluster(view)}
             onToggleSkip={() => toggleSkip(view)}
             onToggleSelect={() => toggleSelect(view.cluster.id)}
+            onShare={() => share(view)}
           />
         ))}
       </div>
@@ -325,18 +291,16 @@ export default function ReviewStep({ onSent }: Props) {
       <div className="fixed inset-x-0 bottom-0 border-t border-neutral-100 bg-white/90 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
           <p className="text-xs text-neutral-400">
-            {invalidCount > 0
-              ? `${invalidCount} ${invalidCount === 1 ? "person needs" : "people need"} a name and contact`
-              : activeCount === 0
-                ? "Everyone is skipped — include at least one person"
-                : `${activeCount} ${activeCount === 1 ? "person" : "people"} will get a link`}
+            {active.length === 0
+              ? "Everyone is skipped — include at least one person"
+              : `${sharedCount} of ${active.length} ${active.length === 1 ? "person" : "people"} shared`}
           </p>
           <button
-            onClick={handleSend}
-            disabled={sending || activeCount === 0}
+            onClick={onSent}
+            disabled={active.length === 0}
             className="rounded-full bg-accent px-6 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
           >
-            {sending ? "Preparing…" : "Send"}
+            Finish
           </button>
         </div>
       </div>
