@@ -9,16 +9,11 @@ import {
   getClusters,
   getFacesForCluster,
   getPhotosForCluster,
-  mergeClusters,
   putCluster,
   resetAll,
   splitCluster,
 } from "@/lib/db";
-import {
-  smartEjectSet,
-  suggestMerges,
-  type MergeSuggestion,
-} from "@/lib/face/cluster";
+import { smartEjectSet } from "@/lib/face/cluster";
 import { newId } from "@/lib/id";
 import { sharePersonPhotos } from "@/lib/share";
 import PersonCard from "@/components/PersonCard";
@@ -44,8 +39,6 @@ export default function ReviewStep({ onSent }: Props) {
   const [names, setNames] = useState<Record<string, string>>({});
   const [showNoFaces, setShowNoFaces] = useState(false);
   const [sharingId, setSharingId] = useState<string | null>(null);
-  const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([]);
-  const dismissedRef = useRef<Set<string>>(new Set());
   const urlsRef = useRef<string[]>([]);
 
   const load = useCallback(async () => {
@@ -89,18 +82,6 @@ export default function ReviewStep({ onSent }: Props) {
         return { photo, url };
       });
 
-    const visibleIds = new Set(views.map((v) => v.cluster.id));
-    setSuggestions(
-      suggestMerges(
-        [...byCluster.entries()]
-          .filter(([clusterId]) => visibleIds.has(clusterId))
-          .map(([clusterId, clusterFaces]) => ({
-            clusterId,
-            descriptors: clusterFaces.map((f) => f.descriptor),
-          }))
-      )
-    );
-
     setPeople(views);
     setNoFacePhotos(noFaces);
     setNames((prev) => {
@@ -143,20 +124,6 @@ export default function ReviewStep({ onSent }: Props) {
 
   async function toggleSkip(view: PersonView) {
     await persistCluster(view, { skipped: !view.cluster.skipped });
-  }
-
-  function pairKey(s: MergeSuggestion): string {
-    return [s.a, s.b].sort().join("|");
-  }
-
-  async function acceptSuggestion(s: MergeSuggestion) {
-    await mergeClusters(s.a, [s.b]);
-    await load();
-  }
-
-  function dismissSuggestion(s: MergeSuggestion) {
-    dismissedRef.current.add(pairKey(s));
-    setSuggestions((prev) => prev.filter((x) => pairKey(x) !== pairKey(s)));
   }
 
   async function ejectFace(view: PersonView, faceId: string) {
@@ -227,18 +194,6 @@ export default function ReviewStep({ onSent }: Props) {
   const active = people.filter((p) => !p.cluster.skipped);
   const sharedCount = active.filter((p) => p.cluster.sent).length;
 
-  const viewById = new Map(people.map((p) => [p.cluster.id, p]));
-  const pendingSuggestions = suggestions.filter(
-    (s) =>
-      !dismissedRef.current.has(pairKey(s)) &&
-      viewById.has(s.a) &&
-      viewById.has(s.b)
-  );
-  const suggestion = pendingSuggestions[0];
-  const suggestionViews = suggestion
-    ? ([viewById.get(suggestion.a)!, viewById.get(suggestion.b)!] as const)
-    : null;
-
   return (
     <div className="pb-28">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
@@ -252,58 +207,6 @@ export default function ReviewStep({ onSent }: Props) {
           </p>
         </div>
       </div>
-
-      {suggestion && suggestionViews && (
-        <div className="mb-5 rounded-2xl border border-accent/30 bg-accent-soft/40 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium">
-                Same person?
-                {pendingSuggestions.length > 1 && (
-                  <span className="ml-2 text-xs font-normal text-neutral-400">
-                    {pendingSuggestions.length} suggestions
-                  </span>
-                )}
-              </p>
-              <div className="mt-2 flex items-center gap-3">
-                {suggestionViews.map((view, i) => (
-                  <div key={view.cluster.id} className="flex items-center gap-3">
-                    {i === 1 && <span className="text-neutral-300">+</span>}
-                    <span className="flex items-center gap-1.5">
-                      {view.crops.slice(0, 2).map((crop) => (
-                        <img
-                          key={crop.faceId}
-                          src={crop.url}
-                          alt="face"
-                          className="h-12 w-12 rounded-full border border-white object-cover"
-                        />
-                      ))}
-                      <span className="ml-1 text-xs text-neutral-500">
-                        {names[view.cluster.id]?.trim() ||
-                          `${view.photoCount} photo${view.photoCount === 1 ? "" : "s"}`}
-                      </span>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => acceptSuggestion(suggestion)}
-                className="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white hover:opacity-90"
-              >
-                Merge
-              </button>
-              <button
-                onClick={() => dismissSuggestion(suggestion)}
-                className="rounded-full border border-neutral-200 bg-white px-4 py-1.5 text-sm hover:bg-neutral-50"
-              >
-                Not the same
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         {people.map((view) => (
