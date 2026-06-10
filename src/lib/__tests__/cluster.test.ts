@@ -59,12 +59,13 @@ describe("clusterDescriptors", () => {
   });
 
   it("polish pass merges clusters whose centroids drift within the threshold", () => {
-    // f2 starts its own cluster (0.565 from f1 > 0.5), but after f3 pulls
-    // cluster 1's centroid to 0.0125, the centroids sit 0.42 apart → merged.
+    // Distances scale by sqrt(128) ≈ 11.31. f2 starts its own cluster
+    // (0.045·11.31 ≈ 0.509 from f1, above 0.4), but after f3 pulls cluster 1's
+    // centroid to 0.0105, the centroids sit ≈0.390 apart → merged.
     const result = clusterDescriptors([
       { faceId: "f1", descriptor: vec(0) },
-      { faceId: "f2", descriptor: vec(0.05) },
-      { faceId: "f3", descriptor: vec(0.025) },
+      { faceId: "f2", descriptor: vec(0.045) },
+      { faceId: "f3", descriptor: vec(0.021) },
     ]);
     expect(result).toHaveLength(1);
     expect([...result[0].faceIds].sort()).toEqual(["f1", "f2", "f3"]);
