@@ -16,7 +16,12 @@ import {
 } from "@/lib/db";
 import { smartEjectSet } from "@/lib/face/cluster";
 import { newId } from "@/lib/id";
-import { deliverGallery, fileShareSupported, prepareGalleryFile } from "@/lib/share";
+import {
+  deliverGallery,
+  downloadGallery,
+  fileShareSupported,
+  prepareGalleryFile,
+} from "@/lib/share";
 import PersonCard from "@/components/PersonCard";
 import type { ClusterRecord, PhotoRecord } from "@/types";
 
@@ -48,8 +53,11 @@ export default function ReviewStep({ onRetry }: Props) {
   const [canShare, setCanShare] = useState(false);
   const urlsRef = useRef<string[]>([]);
   // Pre-built gallery zips keyed by cluster id, so the Send tap can hand the
-  // share sheet a ready File (preserving user activation on mobile).
+  // share sheet a ready File (preserving user activation on mobile). Warmed
+  // lazily as the host names a person — never all at once (a 22-person event
+  // would zip 22 galleries in the background and never finish in time).
   const galleryCache = useRef<Map<string, { name: string; file: File }>>(new Map());
+  const warmTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -119,29 +127,42 @@ export default function ReviewStep({ onRetry }: Props) {
       return next;
     });
     setLoading(false);
-
-    // Warm gallery zips in the background so Send is instant + share-safe.
     galleryCache.current.clear();
-    for (const view of views) {
-      if (view.cluster.deliveredAt == null) {
-        await warmGallery(view.cluster.id, view.cluster.name.trim());
-      }
-    }
-  }, [warmGallery]);
+    // Galleries are warmed lazily (as a person is named), not eagerly here.
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
     load();
     const urls = urlsRef;
+    const timers = warmTimers;
     return () => {
       mounted.current = false;
       urls.current.forEach((u) => URL.revokeObjectURL(u));
       urls.current = [];
+      timers.current.forEach((t) => clearTimeout(t));
+      timers.current.clear();
     };
   }, [load]);
 
+  function scheduleWarm(id: string, name: string) {
+    const timers = warmTimers.current;
+    const existing = timers.get(id);
+    if (existing) clearTimeout(existing);
+    // Debounce: warm the gallery ~0.6s after the host stops typing the name,
+    // so by the time they tap Send the share sheet has a ready File.
+    timers.set(
+      id,
+      setTimeout(() => {
+        timers.delete(id);
+        warmGallery(id, name.trim());
+      }, 600)
+    );
+  }
+
   function updateName(id: string, value: string) {
     setNames((prev) => ({ ...prev, [id]: value }));
+    scheduleWarm(id, value);
   }
 
   async function persistCluster(view: PersonView, patch?: Partial<ClusterRecord>) {
@@ -198,26 +219,31 @@ export default function ReviewStep({ onRetry }: Props) {
     setSharingId(id);
     setStatus(id, null);
     try {
-      // Fast path: a warmed zip whose name matches — deliver synchronously so
-      // the mobile share sheet keeps its user activation.
-      let file: File;
       const cached = galleryCache.current.get(id);
       if (cached && cached.name === name) {
-        file = cached.file;
+        // Warm + correct name: deliver synchronously so the share sheet keeps
+        // its user activation (the first await is navigator.share itself).
+        const result = await deliverGallery(name, cached.file);
+        if (result === "shared") {
+          await persistCluster(view, {
+            deliveredAt: Date.now(),
+            deliveryError: undefined,
+          });
+        } else if (result === "downloaded-zip") {
+          setStatus(id, "downloaded");
+        }
+        // "cancelled" → leave as-is
       } else {
+        // Not warmed yet: building the zip now would burn the click's
+        // activation, so download directly instead of failing the share sheet.
         const photos = await getPhotosForCluster(id);
-        file = await prepareGalleryFile(name, photos);
+        const file = await prepareGalleryFile(name, photos);
         galleryCache.current.set(id, { name, file });
-      }
-      const result = await deliverGallery(name, file);
-      if (result === "shared") {
-        await persistCluster(view, { deliveredAt: Date.now(), deliveryError: undefined });
-      } else if (result === "downloaded-zip") {
+        downloadGallery(file);
         setStatus(id, "downloaded");
-      } else if (result === "failed") {
-        setStatus(id, "error");
       }
-      // "cancelled" → leave as-is
+    } catch {
+      setStatus(id, "error");
     } finally {
       if (mounted.current) setSharingId(null);
     }

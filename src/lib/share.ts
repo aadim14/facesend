@@ -61,6 +61,10 @@ export async function prepareGalleryFile(
  * Deliver an already-prepared gallery File. Call this synchronously from the
  * Send click (no awaits before it) so the share sheet keeps its activation.
  * Mobile/Safari → native share sheet; desktop → reliable zip download.
+ *
+ * A share that fails for any reason other than the user cancelling (lost
+ * activation, file too large, target rejects it) falls back to a download —
+ * the host always gets the gallery, never a dead "couldn't send".
  */
 export async function deliverGallery(
   personName: string,
@@ -74,11 +78,17 @@ export async function deliverGallery(
       return "shared";
     } catch (error) {
       if ((error as DOMException)?.name === "AbortError") return "cancelled";
-      return "failed";
+      saveZipBlob(file.name, file); // fall back so delivery never dead-ends
+      return "downloaded-zip";
     }
   }
   saveZipBlob(file.name, file);
   return "downloaded-zip";
+}
+
+/** Download a prepared gallery File directly (no share sheet, no activation needed). */
+export function downloadGallery(file: File): void {
+  saveZipBlob(file.name, file);
 }
 
 /**
