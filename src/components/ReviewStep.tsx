@@ -11,13 +11,19 @@ import {
   getPhotosForCluster,
   putCluster,
   resetAll,
+  retryFailedPhotos,
   splitCluster,
 } from "@/lib/db";
 import { smartEjectSet } from "@/lib/face/cluster";
 import { newId } from "@/lib/id";
-import { sharePersonPhotos } from "@/lib/share";
+import { sharePersonGallery } from "@/lib/share";
 import PersonCard from "@/components/PersonCard";
 import type { ClusterRecord, PhotoRecord } from "@/types";
+
+interface DeliveryStatus {
+  note: string;
+  tone: "neutral" | "error";
+}
 
 interface PersonView {
   cluster: ClusterRecord;
@@ -28,17 +34,21 @@ interface PersonView {
 
 interface Props {
   onSent: () => void;
+  onRetry: () => void;
 }
 
-export default function ReviewStep({ onSent }: Props) {
+export default function ReviewStep({ onSent, onRetry }: Props) {
   const [loading, setLoading] = useState(true);
   const [people, setPeople] = useState<PersonView[]>([]);
+  const [failedCount, setFailedCount] = useState(0);
+  const [retrying, setRetrying] = useState(false);
   const [noFacePhotos, setNoFacePhotos] = useState<
     { photo: PhotoRecord; url: string }[]
   >([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [showNoFaces, setShowNoFaces] = useState(false);
   const [sharingId, setSharingId] = useState<string | null>(null);
+  const [statuses, setStatuses] = useState<Record<string, DeliveryStatus>>({});
   const urlsRef = useRef<string[]>([]);
 
   const load = useCallback(async () => {
@@ -83,6 +93,7 @@ export default function ReviewStep({ onSent }: Props) {
       });
 
     setPeople(views);
+    setFailedCount(photos.filter((p) => p.faceCount === -2).length);
     setNoFacePhotos(noFaces);
     setNames((prev) => {
       const next: Record<string, string> = {};
@@ -139,24 +150,54 @@ export default function ReviewStep({ onSent }: Props) {
       name: "",
       contact: {},
       skipped: false,
-      sent: false,
+      deliveredAt: null,
     });
     await load();
   }
 
+  function setStatus(id: string, status: DeliveryStatus | null) {
+    setStatuses((prev) => {
+      const next = { ...prev };
+      if (status) next[id] = status;
+      else delete next[id];
+      return next;
+    });
+  }
+
   async function share(view: PersonView) {
     if (sharingId) return;
-    setSharingId(view.cluster.id);
+    const id = view.cluster.id;
+    setSharingId(id);
     try {
-      const name = (names[view.cluster.id] ?? "").trim();
-      const photos = await getPhotosForCluster(view.cluster.id);
-      const outcome = await sharePersonPhotos(name, photos);
-      if (outcome !== "cancelled") {
-        await persistCluster(view, { sent: true });
+      const name = (names[id] ?? "").trim();
+      const photos = await getPhotosForCluster(id);
+      const result = await sharePersonGallery(name, photos);
+      // deliveredAt is set only on a confirmed share — cancel/fail/download don't.
+      if (result === "shared") {
+        setStatus(id, null);
+        await persistCluster(view, {
+          deliveredAt: Date.now(),
+          deliveryError: undefined,
+        });
+      } else if (result === "downloaded-zip") {
+        setStatus(id, {
+          note: "Gallery downloaded — send it to them yourself.",
+          tone: "neutral",
+        });
+      } else if (result === "failed") {
+        setStatus(id, { note: "Couldn't send — try again.", tone: "error" });
       }
     } finally {
       setSharingId(null);
     }
+  }
+
+  async function retryFailed() {
+    if (retrying) return;
+    setRetrying(true);
+    const reset = await retryFailedPhotos();
+    if (reset > 0) onRetry();
+    else setRetrying(false);
   }
 
   async function startOver() {
@@ -164,6 +205,22 @@ export default function ReviewStep({ onSent }: Props) {
     await resetAll();
     window.location.reload();
   }
+
+  const failedBanner = failedCount > 0 && (
+    <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      <span>
+        {failedCount} photo{failedCount === 1 ? "" : "s"} couldn&apos;t be
+        processed.
+      </span>
+      <button
+        onClick={retryFailed}
+        disabled={retrying}
+        className="shrink-0 rounded-full bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+      >
+        {retrying ? "Retrying…" : "Try again"}
+      </button>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -176,14 +233,37 @@ export default function ReviewStep({ onSent }: Props) {
   if (people.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 py-24 text-center">
-        <p className="font-medium">No faces found in these photos</p>
-        <p className="max-w-sm text-sm text-neutral-500">
-          FaceSend groups photos by the people in them, and it couldn&apos;t
-          spot any faces here.
-        </p>
+        {failedCount > 0 ? (
+          <>
+            <p className="font-medium">
+              {failedCount} photo{failedCount === 1 ? "" : "s"} couldn&apos;t be
+              processed
+            </p>
+            <p className="max-w-sm text-sm text-neutral-500">
+              Something went wrong reading{" "}
+              {failedCount === 1 ? "it" : "them"}. Try again, or start over with
+              different photos.
+            </p>
+            <button
+              onClick={retryFailed}
+              disabled={retrying}
+              className="rounded-full bg-accent px-5 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {retrying ? "Retrying…" : "Try again"}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="font-medium">No faces found in these photos</p>
+            <p className="max-w-sm text-sm text-neutral-500">
+              FaceSend groups photos by the people in them, and it couldn&apos;t
+              spot any faces here.
+            </p>
+          </>
+        )}
         <button
           onClick={startOver}
-          className="rounded-full bg-accent px-5 py-2 text-sm font-medium text-white hover:opacity-90"
+          className="text-sm text-neutral-400 underline underline-offset-4 hover:text-neutral-600"
         >
           Start over
         </button>
@@ -192,10 +272,11 @@ export default function ReviewStep({ onSent }: Props) {
   }
 
   const active = people.filter((p) => !p.cluster.skipped);
-  const sharedCount = active.filter((p) => p.cluster.sent).length;
+  const sharedCount = active.filter((p) => p.cluster.deliveredAt != null).length;
 
   return (
     <div className="pb-28">
+      {failedBanner}
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">
@@ -216,7 +297,9 @@ export default function ReviewStep({ onSent }: Props) {
             photoCount={view.photoCount}
             name={names[view.cluster.id] ?? ""}
             skipped={view.cluster.skipped}
-            sent={view.cluster.sent}
+            delivered={view.cluster.deliveredAt != null}
+            statusNote={statuses[view.cluster.id]?.note}
+            statusTone={statuses[view.cluster.id]?.tone}
             sharing={sharingId === view.cluster.id}
             canEject={view.faceCount >= 2}
             onChange={(value) => updateName(view.cluster.id, value)}
@@ -260,7 +343,7 @@ export default function ReviewStep({ onSent }: Props) {
           <p className="text-xs text-neutral-400">
             {active.length === 0
               ? "Everyone is skipped — include at least one person"
-              : `${sharedCount} of ${active.length} ${active.length === 1 ? "person" : "people"} shared`}
+              : `${sharedCount} of ${active.length} ${active.length === 1 ? "person" : "people"} sent`}
           </p>
           <button
             onClick={onSent}

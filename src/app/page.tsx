@@ -73,7 +73,12 @@ export default function Home() {
           onEmpty={() => go("upload")}
         />
       )}
-      {step === "review" && <ReviewStep onSent={() => go("done")} />}
+      {step === "review" && (
+        <ReviewStep
+          onSent={() => go("done")}
+          onRetry={() => go("processing")}
+        />
+      )}
       {step === "done" && <DoneStep onReset={() => go("upload")} />}
     </main>
   );

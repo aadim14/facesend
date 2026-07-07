@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { openDB } from "idb";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   addFaces,
@@ -14,8 +15,10 @@ import {
   putCluster,
   replaceClusters,
   resetAll,
+  retryFailedPhotos,
   setStep,
   splitCluster,
+  upgradeFaceSendDB,
 } from "@/lib/db";
 import type { ClusterRecord, FaceRecord, PhotoRecord } from "@/types";
 
@@ -47,7 +50,7 @@ function makeFace(
 }
 
 function makeCluster(id: string): ClusterRecord {
-  return { id, name: "", contact: {}, skipped: false, sent: false };
+  return { id, name: "", contact: {}, skipped: false, deliveredAt: null };
 }
 
 beforeEach(async () => {
@@ -132,6 +135,53 @@ describe("resetAll", () => {
     expect(await getAllFaces()).toHaveLength(0);
     expect(await getClusters()).toHaveLength(0);
     expect(await getStep()).toBe("upload");
+  });
+});
+
+describe("v2 migration: sent -> deliveredAt", () => {
+  it("resets deliveredAt to null and drops the old optimistic sent flag", async () => {
+    const name = "facesend-migtest";
+    const v1 = await openDB(name, 1, {
+      upgrade(db) {
+        db.createObjectStore("clusters", { keyPath: "id" });
+      },
+    });
+    await v1.put("clusters", {
+      id: "c1",
+      name: "Ann",
+      contact: {},
+      skipped: false,
+      sent: true,
+    });
+    v1.close();
+
+    const v2 = await openDB(name, 2, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      upgrade: upgradeFaceSendDB as any,
+    });
+    const migrated = (await v2.get("clusters", "c1")) as ClusterRecord & {
+      sent?: boolean;
+    };
+    v2.close();
+
+    expect(migrated.deliveredAt).toBeNull();
+    expect(migrated.sent).toBeUndefined();
+    expect(migrated.name).toBe("Ann");
+  });
+});
+
+describe("retryFailedPhotos", () => {
+  it("resets only failed (-2) photos back to unprocessed (-1)", async () => {
+    await addPhoto({ ...makePhoto("p1"), faceCount: -2 });
+    await addPhoto({ ...makePhoto("p2"), faceCount: 0 });
+    await addPhoto({ ...makePhoto("p3"), faceCount: -2 });
+
+    const reset = await retryFailedPhotos();
+
+    expect(reset).toBe(2);
+    expect((await getPhoto("p1"))?.faceCount).toBe(-1);
+    expect((await getPhoto("p2"))?.faceCount).toBe(0);
+    expect((await getPhoto("p3"))?.faceCount).toBe(-1);
   });
 });
 

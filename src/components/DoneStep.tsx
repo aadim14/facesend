@@ -10,7 +10,7 @@ import {
   putCluster,
   resetAll,
 } from "@/lib/db";
-import { fileShareSupported, sharePersonPhotos } from "@/lib/share";
+import { fileShareSupported, sharePersonGallery } from "@/lib/share";
 import type { ClusterRecord } from "@/types";
 
 interface PersonRow {
@@ -23,11 +23,16 @@ interface Props {
   onReset: () => void;
 }
 
+function isDelivered(cluster: ClusterRecord): boolean {
+  return cluster.deliveredAt != null;
+}
+
 export default function DoneStep({ onReset }: Props) {
   const [rows, setRows] = useState<PersonRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [zipFellBack, setZipFellBack] = useState(false);
+  const [errorId, setErrorId] = useState<string | null>(null);
   const urlsRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -48,7 +53,7 @@ export default function DoneStep({ onReset }: Props) {
         .filter((r) => r.photoCount > 0)
         .sort(
           (a, b) =>
-            Number(a.cluster.sent) - Number(b.cluster.sent) ||
+            Number(isDelivered(a.cluster)) - Number(isDelivered(b.cluster)) ||
             a.cluster.name.localeCompare(b.cluster.name)
         );
       setRows(result);
@@ -64,22 +69,26 @@ export default function DoneStep({ onReset }: Props) {
 
   async function share(row: PersonRow) {
     if (sharingId) return;
-    setSharingId(row.cluster.id);
+    const id = row.cluster.id;
+    setSharingId(id);
+    setErrorId(null);
     try {
-      const photos = await getPhotosForCluster(row.cluster.id);
-      const outcome = await sharePersonPhotos(row.cluster.name, photos);
+      const photos = await getPhotosForCluster(id);
+      const result = await sharePersonGallery(row.cluster.name, photos);
       // A zip download instead of the share sheet means this browser can't
       // hand files to Messages/AirDrop — surface the Safari tip.
-      if (outcome === "downloaded" && !fileShareSupported()) {
+      if (result === "downloaded-zip" && !fileShareSupported()) {
         setZipFellBack(true);
       }
-      if (outcome !== "cancelled" && !row.cluster.sent) {
-        const updated = { ...row.cluster, sent: true };
+      if (result === "failed") {
+        setErrorId(id);
+      }
+      // deliveredAt is set only on a confirmed share.
+      if (result === "shared") {
+        const updated = { ...row.cluster, deliveredAt: Date.now(), deliveryError: undefined };
         await putCluster(updated);
         setRows((prev) =>
-          prev.map((r) =>
-            r.cluster.id === row.cluster.id ? { ...r, cluster: updated } : r
-          )
+          prev.map((r) => (r.cluster.id === id ? { ...r, cluster: updated } : r))
         );
       }
     } finally {
@@ -106,7 +115,7 @@ export default function DoneStep({ onReset }: Props) {
     );
   }
 
-  const unsent = rows.filter((r) => !r.cluster.sent).length;
+  const unsent = rows.filter((r) => !isDelivered(r.cluster)).length;
 
   return (
     <div className="py-4">
@@ -119,8 +128,8 @@ export default function DoneStep({ onReset }: Props) {
         </h2>
         <p className="mt-2 text-sm text-neutral-500">
           {unsent === 0
-            ? "Every person's photos went out. You can share anyone's set again below."
-            : `${unsent} ${unsent === 1 ? "person hasn't" : "people haven't"} been shared yet — send theirs below.`}
+            ? "Every person's gallery went out. You can send anyone's again below."
+            : `${unsent} ${unsent === 1 ? "person hasn't" : "people haven't"} been sent yet — send theirs below.`}
         </p>
       </div>
 
@@ -154,8 +163,11 @@ export default function DoneStep({ onReset }: Props) {
               </p>
               <p className="truncate text-xs text-neutral-400">
                 {row.photoCount} photo{row.photoCount === 1 ? "" : "s"}
-                {row.cluster.sent && (
-                  <span className="text-green-600"> · shared ✓</span>
+                {isDelivered(row.cluster) && (
+                  <span className="text-green-600"> · sent ✓</span>
+                )}
+                {errorId === row.cluster.id && !isDelivered(row.cluster) && (
+                  <span className="text-red-600"> · couldn&apos;t send</span>
                 )}
               </p>
             </div>
@@ -163,16 +175,16 @@ export default function DoneStep({ onReset }: Props) {
               onClick={() => share(row)}
               disabled={sharingId === row.cluster.id}
               className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
-                row.cluster.sent
+                isDelivered(row.cluster)
                   ? "border border-neutral-200 hover:bg-neutral-50"
                   : "bg-accent text-white hover:opacity-90"
               }`}
             >
               {sharingId === row.cluster.id
-                ? "Sharing…"
-                : row.cluster.sent
-                  ? "Share again"
-                  : "Share"}
+                ? "Sending…"
+                : isDelivered(row.cluster)
+                  ? "Send again"
+                  : "Send"}
             </button>
           </li>
         ))}

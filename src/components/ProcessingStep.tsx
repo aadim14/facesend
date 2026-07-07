@@ -151,8 +151,10 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
           found += detected.length;
           setFacesFound(found);
         } catch {
-          // One unreadable/failed photo must not kill the batch.
-          await setPhotoFaceCount(photo.id, 0);
+          // One unreadable/failed photo must not kill the batch — but mark it
+          // -2 (failed), distinct from 0 (genuinely no faces), so it surfaces
+          // as retryable instead of silently vanishing into "No faces found".
+          await setPhotoFaceCount(photo.id, -2);
         }
         setProgress({ done: alreadyDone + i + 1, total: photos.length });
         // The first photo includes one-time GPU shader warm-up — exclude it
@@ -177,7 +179,7 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
           name: "",
           contact: {},
           skipped: false,
-          sent: false,
+          deliveredAt: null,
         };
         records.push(record);
         recordById.set(record.id, record);

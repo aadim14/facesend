@@ -14,7 +14,10 @@ interface Props {
   photoCount: number;
   name: string;
   skipped: boolean;
-  sent: boolean;
+  delivered: boolean;
+  /** Honest sub-status when not delivered: a download note or an error. */
+  statusNote?: string;
+  statusTone?: "neutral" | "error";
   sharing: boolean;
   canEject: boolean;
   onChange: (value: string) => void;
@@ -29,7 +32,9 @@ export default function PersonCard({
   photoCount,
   name,
   skipped,
-  sent,
+  delivered,
+  statusNote,
+  statusTone = "neutral",
   sharing,
   canEject,
   onChange,
@@ -133,13 +138,26 @@ export default function PersonCard({
           onClick={onShare}
           disabled={skipped || sharing}
           className={`w-full rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
-            sent
+            delivered
               ? "bg-green-50 text-green-700 hover:bg-green-100"
               : "bg-accent text-white hover:opacity-90"
           }`}
         >
-          {sharing ? "Sharing…" : sent ? "Shared ✓ · Share again" : "Share photos"}
+          {sharing
+            ? "Sending…"
+            : delivered
+              ? "Sent ✓ · Send again"
+              : "Send their photos"}
         </button>
+        {!delivered && statusNote && (
+          <p
+            className={`text-xs ${
+              statusTone === "error" ? "text-red-600" : "text-neutral-400"
+            }`}
+          >
+            {statusNote}
+          </p>
+        )}
       </div>
     </div>
   );

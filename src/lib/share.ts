@@ -1,27 +1,18 @@
 import type { PhotoRecord } from "@/types";
-import {
-  downloadAllAsZip,
-  sanitizeFilename,
-  uniqueFilenames,
-  type ZipEntry,
-} from "@/lib/zip";
-
-export type ShareOutcome = "shared" | "downloaded" | "cancelled";
+import { buildBundle, type BundleSize } from "@/lib/bundle";
+import { sanitizeFilename, saveZipBlob, uniqueFilenames } from "@/lib/zip";
 
 /**
- * iMessage and most share targets degrade past a couple dozen attachments;
- * bigger sets go through the sheet as a single zip instead.
+ * Outcome of a delivery attempt.
+ * - `shared`         — the OS share sheet confirmed; this is the only outcome that counts as delivered.
+ * - `cancelled`      — the host dismissed the share sheet or save dialog; no-op.
+ * - `failed`         — the share threw; surface the error, do not silently pretend success.
+ * - `downloaded-zip` — no file-share support (desktop), so the gallery zip downloaded instead; the host still has to send it.
  */
-const MAX_LOOSE_FILES = 20;
+export type ShareResult = "shared" | "cancelled" | "failed" | "downloaded-zip";
 
-function photoFiles(photos: PhotoRecord[]): File[] {
-  const names = uniqueFilenames(
-    photos.map((p) => sanitizeFilename(p.name, "photo"))
-  );
-  return photos.map(
-    (p, i) => new File([p.blob], names[i], { type: p.blob.type || "image/jpeg" })
-  );
-}
+/** iMessage/AirDrop degrade past a couple dozen loose attachments. */
+const MAX_LOOSE_FILES = 20;
 
 function canShareFiles(files: File[]): boolean {
   return (
@@ -40,58 +31,86 @@ export function fileShareSupported(): boolean {
   return canShareFiles([new File(["x"], "probe.txt", { type: "text/plain" })]);
 }
 
-/** null = share unavailable/failed in a way the caller should fall back from. */
-async function tryShare(files: File[], title: string): Promise<ShareOutcome | null> {
+/** "shared" | "cancelled" | "failed" — null-free discriminated share attempt. */
+async function tryShareFiles(files: File[], title: string): Promise<ShareResult> {
   try {
     await navigator.share({ files, title });
     return "shared";
   } catch (error) {
     if ((error as DOMException)?.name === "AbortError") return "cancelled";
-    return null;
+    return "failed";
   }
 }
 
+/** Zip a person's gallery bundle into one `.zip` File. */
+async function bundleZipFile(
+  personName: string,
+  photos: PhotoRecord[],
+  size: BundleSize
+): Promise<File> {
+  const bundle = await buildBundle(personName, photos, { size });
+  const { downloadZip } = await import("client-zip");
+  const blob = await downloadZip(
+    bundle.files.map((f) => ({ name: f.name, input: f.blob }))
+  ).blob();
+  return new File(
+    [blob],
+    `${sanitizeFilename(personName || "photos")}-gallery.zip`,
+    { type: "application/zip" }
+  );
+}
+
 /**
- * Share one person's photos through the native share sheet (iMessage,
- * AirDrop, WhatsApp, …). Small sets go as image files, large sets as one
- * zip. Where no share sheet exists (desktop), saves a zip instead.
+ * Deliver one person's photos as a self-contained gallery. The gallery is
+ * always a single `.zip` shared through the OS share sheet (never loose
+ * files — Web Share flattens a file array, which would break the gallery's
+ * relative photo paths and type-route the images away on iOS). Where the
+ * browser can't share files (desktop), the same zip downloads instead.
  *
- * Must be called from a user gesture — navigator.share requires transient
+ * Must be called from a user gesture — navigator.share needs transient
  * activation, and only works in secure contexts (https / localhost).
  */
-export async function sharePersonPhotos(
+export async function sharePersonGallery(
+  personName: string,
+  photos: PhotoRecord[],
+  opts: { size?: BundleSize } = {}
+): Promise<ShareResult> {
+  const name = personName.trim();
+  const title = name ? `Photos of ${name}` : "Your photos";
+  const zipFile = await bundleZipFile(name, photos, opts.size ?? "original");
+
+  if (canShareFiles([zipFile])) {
+    return tryShareFiles([zipFile], title);
+  }
+  // Desktop / no file-share: download the same gallery zip. Not "delivered" —
+  // the host still has to send it, and the UI says so.
+  const saved = await saveZipBlob(zipFile.name, zipFile);
+  return saved ? "downloaded-zip" : "cancelled";
+}
+
+/**
+ * Separate "save photos to camera roll" action: shares the loose image files
+ * (no gallery) for recipients who just want the pictures in their roll. Large
+ * sets fall back to the gallery zip. Returns "downloaded-zip" only when the
+ * browser can't share files at all.
+ */
+export async function sharePhotosToCameraRoll(
   personName: string,
   photos: PhotoRecord[]
-): Promise<ShareOutcome> {
+): Promise<ShareResult> {
   const name = personName.trim();
   const title = name ? `Photos of ${name}` : "Your photos";
 
   if (photos.length <= MAX_LOOSE_FILES) {
-    const files = photoFiles(photos);
-    if (canShareFiles(files)) {
-      const outcome = await tryShare(files, title);
-      if (outcome) return outcome;
-    }
-  } else {
-    const { downloadZip } = await import("client-zip");
     const names = uniqueFilenames(
       photos.map((p) => sanitizeFilename(p.name, "photo"))
     );
-    const blob = await downloadZip(
-      photos.map((p, i) => ({ name: names[i], input: p.blob }))
-    ).blob();
-    const zipFile = new File(
-      [blob],
-      `${sanitizeFilename(name || "person")}-photos.zip`,
-      { type: "application/zip" }
+    const files = photos.map(
+      (p, i) =>
+        new File([p.blob], names[i], { type: p.blob.type || "image/jpeg" })
     );
-    if (canShareFiles([zipFile])) {
-      const outcome = await tryShare([zipFile], title);
-      if (outcome) return outcome;
-    }
+    if (canShareFiles(files)) return tryShareFiles(files, title);
   }
-
-  const entries: ZipEntry[] = photos.map((p) => ({ name: p.name, blob: p.blob }));
-  const saved = await downloadAllAsZip(name || "person", entries);
-  return saved ? "downloaded" : "cancelled";
+  // Too many loose files, or no loose-file support: fall back to the gallery zip.
+  return sharePersonGallery(name, photos);
 }
