@@ -31,43 +31,17 @@ export interface ZipEntry {
   blob: Blob;
 }
 
-interface SaveFilePickerWindow extends Window {
-  showSaveFilePicker?: (options: {
-    suggestedName?: string;
-    types?: { description: string; accept: Record<string, string[]> }[];
-  }) => Promise<{
-    createWritable: () => Promise<{
-      write: (chunk: unknown) => Promise<void>;
-      close: () => Promise<void>;
-    }>;
-  }>;
-}
-
 /**
- * Save a ready-made zip Blob to disk as `zipName`. Uses the File System
- * Access picker where available (so cancellation is detectable), else an
- * anchor download. Returns false only when the user cancelled the picker.
+ * Save a ready-made zip Blob to disk as `zipName` via an anchor download.
+ *
+ * Deliberately NOT using `showSaveFilePicker`: that API requires transient
+ * user activation, which is gone by the time we've built and zipped the
+ * gallery — it then throws AbortError, which is indistinguishable from a real
+ * cancel and made "Send" silently do nothing. An anchor download needs no
+ * activation and works in every browser, so delivery is reliable. Always
+ * returns true (the download is initiated synchronously; there is no cancel).
  */
-export async function saveZipBlob(zipName: string, blob: Blob): Promise<boolean> {
-  const picker = (window as SaveFilePickerWindow).showSaveFilePicker;
-  if (picker) {
-    try {
-      const handle = await picker({
-        suggestedName: zipName,
-        types: [
-          { description: "ZIP archive", accept: { "application/zip": [".zip"] } },
-        ],
-      });
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      return true;
-    } catch (error) {
-      if ((error as DOMException)?.name === "AbortError") return false; // user cancelled
-      // fall through to the anchor path on any other picker failure
-    }
-  }
-
+export function saveZipBlob(zipName: string, blob: Blob): boolean {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
