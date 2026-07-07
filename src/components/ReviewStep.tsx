@@ -16,14 +16,9 @@ import {
 } from "@/lib/db";
 import { smartEjectSet } from "@/lib/face/cluster";
 import { newId } from "@/lib/id";
-import { sharePersonGallery } from "@/lib/share";
+import { deliverGallery, fileShareSupported, prepareGalleryFile } from "@/lib/share";
 import PersonCard from "@/components/PersonCard";
 import type { ClusterRecord, PhotoRecord } from "@/types";
-
-interface DeliveryStatus {
-  note: string;
-  tone: "neutral" | "error";
-}
 
 interface PersonView {
   cluster: ClusterRecord;
@@ -33,11 +28,10 @@ interface PersonView {
 }
 
 interface Props {
-  onSent: () => void;
   onRetry: () => void;
 }
 
-export default function ReviewStep({ onSent, onRetry }: Props) {
+export default function ReviewStep({ onRetry }: Props) {
   const [loading, setLoading] = useState(true);
   const [people, setPeople] = useState<PersonView[]>([]);
   const [failedCount, setFailedCount] = useState(0);
@@ -48,8 +42,30 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
   const [names, setNames] = useState<Record<string, string>>({});
   const [showNoFaces, setShowNoFaces] = useState(false);
   const [sharingId, setSharingId] = useState<string | null>(null);
-  const [statuses, setStatuses] = useState<Record<string, DeliveryStatus>>({});
+  // Ephemeral per-session delivery outcome for the desktop download path
+  // (a confirmed mobile share is persisted on the cluster as deliveredAt).
+  const [statuses, setStatuses] = useState<Record<string, "downloaded" | "error">>({});
+  const [canShare, setCanShare] = useState(false);
   const urlsRef = useRef<string[]>([]);
+  // Pre-built gallery zips keyed by cluster id, so the Send tap can hand the
+  // share sheet a ready File (preserving user activation on mobile).
+  const galleryCache = useRef<Map<string, { name: string; file: File }>>(new Map());
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    setCanShare(fileShareSupported());
+  }, []);
+
+  const warmGallery = useCallback(async (clusterId: string, name: string) => {
+    try {
+      const photos = await getPhotosForCluster(clusterId);
+      if (photos.length === 0) return;
+      const file = await prepareGalleryFile(name, photos);
+      if (mounted.current) galleryCache.current.set(clusterId, { name, file });
+    } catch {
+      // best-effort warm-up; deliver() rebuilds on demand if the cache misses
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,12 +119,22 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
       return next;
     });
     setLoading(false);
-  }, []);
+
+    // Warm gallery zips in the background so Send is instant + share-safe.
+    galleryCache.current.clear();
+    for (const view of views) {
+      if (view.cluster.deliveredAt == null) {
+        await warmGallery(view.cluster.id, view.cluster.name.trim());
+      }
+    }
+  }, [warmGallery]);
 
   useEffect(() => {
+    mounted.current = true;
     load();
     const urls = urlsRef;
     return () => {
+      mounted.current = false;
       urls.current.forEach((u) => URL.revokeObjectURL(u));
       urls.current = [];
     };
@@ -119,17 +145,17 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
   }
 
   async function persistCluster(view: PersonView, patch?: Partial<ClusterRecord>) {
-    const updated: ClusterRecord = {
-      ...view.cluster,
-      name: (names[view.cluster.id] ?? view.cluster.name).trim(),
-      ...patch,
-    };
+    const name = (names[view.cluster.id] ?? view.cluster.name).trim();
+    const updated: ClusterRecord = { ...view.cluster, name, ...patch };
     await putCluster(updated);
     setPeople((prev) =>
       prev.map((p) =>
         p.cluster.id === view.cluster.id ? { ...p, cluster: updated } : p
       )
     );
+    // Name feeds the gallery header + filename — re-warm so the cached zip matches.
+    const cached = galleryCache.current.get(view.cluster.id);
+    if (!cached || cached.name !== name) warmGallery(view.cluster.id, name);
     return updated;
   }
 
@@ -139,7 +165,7 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
 
   async function ejectFace(view: PersonView, faceId: string) {
     const faces = await getFacesForCluster(view.cluster.id);
-    if (faces.length < 2) return; // nothing to split from
+    if (faces.length < 2) return;
     const ejectIds = smartEjectSet(
       faces.map((f) => ({ faceId: f.id, descriptor: f.descriptor })),
       faceId
@@ -152,13 +178,14 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
       skipped: false,
       deliveredAt: null,
     });
+    galleryCache.current.delete(view.cluster.id); // photos changed — rebuild
     await load();
   }
 
-  function setStatus(id: string, status: DeliveryStatus | null) {
+  function setStatus(id: string, value: "downloaded" | "error" | null) {
     setStatuses((prev) => {
       const next = { ...prev };
-      if (status) next[id] = status;
+      if (value) next[id] = value;
       else delete next[id];
       return next;
     });
@@ -167,28 +194,32 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
   async function share(view: PersonView) {
     if (sharingId) return;
     const id = view.cluster.id;
+    const name = (names[id] ?? "").trim();
     setSharingId(id);
+    setStatus(id, null);
     try {
-      const name = (names[id] ?? "").trim();
-      const photos = await getPhotosForCluster(id);
-      const result = await sharePersonGallery(name, photos);
-      // deliveredAt is set only on a confirmed share — cancel/fail/download don't.
-      if (result === "shared") {
-        setStatus(id, null);
-        await persistCluster(view, {
-          deliveredAt: Date.now(),
-          deliveryError: undefined,
-        });
-      } else if (result === "downloaded-zip") {
-        setStatus(id, {
-          note: "Gallery downloaded — send it to them yourself.",
-          tone: "neutral",
-        });
-      } else if (result === "failed") {
-        setStatus(id, { note: "Couldn't send — try again.", tone: "error" });
+      // Fast path: a warmed zip whose name matches — deliver synchronously so
+      // the mobile share sheet keeps its user activation.
+      let file: File;
+      const cached = galleryCache.current.get(id);
+      if (cached && cached.name === name) {
+        file = cached.file;
+      } else {
+        const photos = await getPhotosForCluster(id);
+        file = await prepareGalleryFile(name, photos);
+        galleryCache.current.set(id, { name, file });
       }
+      const result = await deliverGallery(name, file);
+      if (result === "shared") {
+        await persistCluster(view, { deliveredAt: Date.now(), deliveryError: undefined });
+      } else if (result === "downloaded-zip") {
+        setStatus(id, "downloaded");
+      } else if (result === "failed") {
+        setStatus(id, "error");
+      }
+      // "cancelled" → leave as-is
     } finally {
-      setSharingId(null);
+      if (mounted.current) setSharingId(null);
     }
   }
 
@@ -206,11 +237,37 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
     window.location.reload();
   }
 
+  function isDone(view: PersonView): boolean {
+    return view.cluster.deliveredAt != null || statuses[view.cluster.id] === "downloaded";
+  }
+
+  function actionLabel(view: PersonView): string {
+    if (sharingId === view.cluster.id) return canShare ? "Opening share…" : "Preparing…";
+    if (isDone(view)) return canShare ? "Sent ✓ · Send again" : "Downloaded ✓ · Again";
+    return canShare ? "Share their photos" : "Download their gallery";
+  }
+
+  function noteFor(view: PersonView): { note?: string; tone: "ok" | "error" | "neutral" } {
+    const id = view.cluster.id;
+    if (statuses[id] === "error") return { note: "Couldn't send — try again.", tone: "error" };
+    if (statuses[id] === "downloaded")
+      return { note: "Downloaded ✓ — now send it to them.", tone: "ok" };
+    if (view.cluster.deliveredAt != null) return { tone: "ok" };
+    return { tone: "neutral" };
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-1 items-center justify-center py-24 text-sm text-neutral-400">
+        Loading people…
+      </div>
+    );
+  }
+
   const failedBanner = failedCount > 0 && (
     <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
       <span>
-        {failedCount} photo{failedCount === 1 ? "" : "s"} couldn&apos;t be
-        processed.
+        {failedCount} photo{failedCount === 1 ? "" : "s"} couldn&apos;t be processed.
       </span>
       <button
         onClick={retryFailed}
@@ -222,27 +279,17 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
     </div>
   );
 
-  if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center py-24 text-sm text-neutral-400">
-        Loading people…
-      </div>
-    );
-  }
-
   if (people.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 py-24 text-center">
         {failedCount > 0 ? (
           <>
             <p className="font-medium">
-              {failedCount} photo{failedCount === 1 ? "" : "s"} couldn&apos;t be
-              processed
+              {failedCount} photo{failedCount === 1 ? "" : "s"} couldn&apos;t be processed
             </p>
             <p className="max-w-sm text-sm text-neutral-500">
-              Something went wrong reading{" "}
-              {failedCount === 1 ? "it" : "them"}. Try again, or start over with
-              different photos.
+              Something went wrong reading {failedCount === 1 ? "it" : "them"}. Try
+              again, or start over with different photos.
             </p>
             <button
               onClick={retryFailed}
@@ -256,8 +303,8 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
           <>
             <p className="font-medium">No faces found in these photos</p>
             <p className="max-w-sm text-sm text-neutral-500">
-              FaceSend groups photos by the people in them, and it couldn&apos;t
-              spot any faces here.
+              FaceSend groups photos by the people in them, and it couldn&apos;t spot
+              any faces here.
             </p>
           </>
         )}
@@ -272,43 +319,81 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
   }
 
   const active = people.filter((p) => !p.cluster.skipped);
-  const sharedCount = active.filter((p) => p.cluster.deliveredAt != null).length;
+  const doneCount = active.filter((p) => isDone(p)).length;
+  const allDone = active.length > 0 && doneCount === active.length;
+  const pct = active.length ? Math.round((doneCount / active.length) * 100) : 0;
 
   return (
-    <div className="pb-28">
+    <div className="pb-16">
       {failedBanner}
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">
-            {people.length} {people.length === 1 ? "person" : "people"} found
-          </h2>
-          <p className="mt-1 text-sm text-neutral-500">
-            Share each person their photos — straight to iMessage, WhatsApp,
-            or AirDrop.
-          </p>
-        </div>
+
+      <div className="mb-4">
+        <h2 className="text-2xl font-semibold tracking-tight">
+          {people.length} {people.length === 1 ? "person" : "people"} found
+        </h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          {canShare
+            ? "Send each person their photos — straight to Messages, WhatsApp, or AirDrop."
+            : "Download each person's gallery, then send it to them. On a phone, FaceSend can share it straight to Messages or WhatsApp."}
+        </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {people.map((view) => (
-          <PersonCard
-            key={view.cluster.id}
-            crops={view.crops}
-            photoCount={view.photoCount}
-            name={names[view.cluster.id] ?? ""}
-            skipped={view.cluster.skipped}
-            delivered={view.cluster.deliveredAt != null}
-            statusNote={statuses[view.cluster.id]?.note}
-            statusTone={statuses[view.cluster.id]?.tone}
-            sharing={sharingId === view.cluster.id}
-            canEject={view.faceCount >= 2}
-            onChange={(value) => updateName(view.cluster.id, value)}
-            onPersist={() => persistCluster(view)}
-            onToggleSkip={() => toggleSkip(view)}
-            onShare={() => share(view)}
-            onEjectFace={(faceId) => ejectFace(view, faceId)}
+      {/* progress */}
+      <div className="mb-6">
+        <div className="h-2 overflow-hidden rounded-full bg-neutral-100">
+          <div
+            className="h-full rounded-full bg-accent transition-all duration-500"
+            style={{ width: `${pct}%` }}
           />
-        ))}
+        </div>
+        <p className="mt-2 text-xs text-neutral-500">
+          <span className="font-medium text-neutral-700">{doneCount}</span> of{" "}
+          {active.length} {canShare ? "sent" : "downloaded"}
+        </p>
+      </div>
+
+      {allDone && (
+        <div className="mb-6 flex items-center gap-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-600 text-white">
+            ✓
+          </span>
+          <div className="text-sm">
+            <p className="font-medium text-green-800">
+              {canShare ? "Everyone has their photos 🎉" : "All galleries ready 🎉"}
+            </p>
+            <p className="text-green-700">
+              {canShare
+                ? "You can send anyone's again below."
+                : "Send each downloaded gallery to its person."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        {people.map((view) => {
+          const note = noteFor(view);
+          return (
+            <PersonCard
+              key={view.cluster.id}
+              crops={view.crops}
+              photoCount={view.photoCount}
+              name={names[view.cluster.id] ?? ""}
+              skipped={view.cluster.skipped}
+              done={isDone(view)}
+              working={sharingId === view.cluster.id}
+              actionLabel={actionLabel(view)}
+              statusNote={note.note}
+              statusTone={note.tone}
+              canEject={view.faceCount >= 2}
+              onChange={(value) => updateName(view.cluster.id, value)}
+              onPersist={() => persistCluster(view)}
+              onToggleSkip={() => toggleSkip(view)}
+              onShare={() => share(view)}
+              onEjectFace={(faceId) => ejectFace(view, faceId)}
+            />
+          );
+        })}
       </div>
 
       {noFacePhotos.length > 0 && (
@@ -317,8 +402,8 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
             onClick={() => setShowNoFaces((s) => !s)}
             className="text-sm font-medium text-neutral-500 hover:text-neutral-700"
           >
-            {showNoFaces ? "▾" : "▸"} No faces found ({noFacePhotos.length}{" "}
-            photo{noFacePhotos.length === 1 ? "" : "s"})
+            {showNoFaces ? "▾" : "▸"} No faces found ({noFacePhotos.length} photo
+            {noFacePhotos.length === 1 ? "" : "s"})
           </button>
           {showNoFaces && (
             <div className="mt-3 grid grid-cols-4 gap-1.5 sm:grid-cols-6">
@@ -338,21 +423,13 @@ export default function ReviewStep({ onSent, onRetry }: Props) {
         </div>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 border-t border-neutral-100 bg-white/90 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <p className="text-xs text-neutral-400">
-            {active.length === 0
-              ? "Everyone is skipped — include at least one person"
-              : `${sharedCount} of ${active.length} ${active.length === 1 ? "person" : "people"} sent`}
-          </p>
-          <button
-            onClick={onSent}
-            disabled={active.length === 0}
-            className="rounded-full bg-accent px-6 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-          >
-            Finish
-          </button>
-        </div>
+      <div className="mt-12 text-center">
+        <button
+          onClick={startOver}
+          className="text-sm text-neutral-400 underline underline-offset-4 hover:text-neutral-600"
+        >
+          Start over with new photos
+        </button>
       </div>
     </div>
   );

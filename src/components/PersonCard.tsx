@@ -14,11 +14,14 @@ interface Props {
   photoCount: number;
   name: string;
   skipped: boolean;
-  delivered: boolean;
-  /** Honest sub-status when not delivered: a download note or an error. */
+  /** Done for this session — delivered (shared) or downloaded. */
+  done: boolean;
+  working: boolean;
+  /** Honest, device-aware button label supplied by the parent. */
+  actionLabel: string;
+  /** Sub-status under the button: a download note or an error. */
   statusNote?: string;
-  statusTone?: "neutral" | "error";
-  sharing: boolean;
+  statusTone?: "neutral" | "ok" | "error";
   canEject: boolean;
   onChange: (value: string) => void;
   onPersist: () => void;
@@ -32,10 +35,11 @@ export default function PersonCard({
   photoCount,
   name,
   skipped,
-  delivered,
+  done,
+  working,
+  actionLabel,
   statusNote,
   statusTone = "neutral",
-  sharing,
   canEject,
   onChange,
   onPersist,
@@ -51,10 +55,21 @@ export default function PersonCard({
     setConfirmFaceId((current) => (current === faceId ? null : faceId));
   }
 
+  const noteColor =
+    statusTone === "error"
+      ? "text-red-600"
+      : statusTone === "ok"
+        ? "text-green-600"
+        : "text-neutral-400";
+
   return (
     <div
-      className={`relative rounded-2xl border border-neutral-200 p-4 transition-all ${
-        skipped ? "opacity-50" : ""
+      className={`relative rounded-2xl border p-4 transition-all ${
+        skipped
+          ? "border-neutral-200 opacity-50"
+          : done
+            ? "border-green-200 bg-green-50/40"
+            : "border-neutral-200"
       }`}
     >
       <button
@@ -128,7 +143,7 @@ export default function PersonCard({
         <input
           type="text"
           value={name}
-          placeholder="Name (optional)"
+          placeholder="Add a name"
           disabled={skipped}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onPersist}
@@ -136,27 +151,20 @@ export default function PersonCard({
         />
         <button
           onClick={onShare}
-          disabled={skipped || sharing}
-          className={`w-full rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
-            delivered
+          disabled={skipped || working}
+          className={`flex w-full items-center justify-center gap-2 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-60 ${
+            done
               ? "bg-green-50 text-green-700 hover:bg-green-100"
               : "bg-accent text-white hover:opacity-90"
           }`}
         >
-          {sharing
-            ? "Sending…"
-            : delivered
-              ? "Sent ✓ · Send again"
-              : "Send their photos"}
+          {working && (
+            <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" />
+          )}
+          {actionLabel}
         </button>
-        {!delivered && statusNote && (
-          <p
-            className={`text-xs ${
-              statusTone === "error" ? "text-red-600" : "text-neutral-400"
-            }`}
-          >
-            {statusNote}
-          </p>
+        {!skipped && statusNote && (
+          <p className={`text-xs ${noteColor}`}>{statusNote}</p>
         )}
       </div>
     </div>

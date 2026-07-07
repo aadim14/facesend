@@ -6,30 +6,35 @@ import { getStep, setStep as persistStep } from "@/lib/db";
 import UploadStep from "@/components/UploadStep";
 import ProcessingStep from "@/components/ProcessingStep";
 import ReviewStep from "@/components/ReviewStep";
-import DoneStep from "@/components/DoneStep";
 
 const STEP_LABELS: { key: Step; label: string }[] = [
-  { key: "upload", label: "Upload" },
-  { key: "review", label: "People" },
-  { key: "done", label: "Share" },
+  { key: "upload", label: "Photos" },
+  { key: "review", label: "People & sending" },
 ];
 
 function stepIndex(step: Step): number {
   if (step === "upload" || step === "processing") return 0;
-  if (step === "review") return 1;
-  return 2;
+  return 1; // review (and legacy "done") — find, name, and send on one screen
 }
 
 export default function Home() {
   const [step, setStepState] = useState<Step | null>(null);
 
   useEffect(() => {
-    getStep().then(setStepState);
+    // Never leave the app stuck on "Loading…" — if reading the saved step
+    // fails (storage blocked/evicted), fall back to a fresh upload.
+    getStep()
+      .then(setStepState)
+      .catch(() => setStepState("upload"));
   }, []);
 
   const go = useCallback(async (next: Step) => {
-    await persistStep(next);
     setStepState(next);
+    try {
+      await persistStep(next);
+    } catch {
+      // resuming-on-reload is a nice-to-have; navigation must not depend on it
+    }
   }, []);
 
   return (
@@ -73,13 +78,9 @@ export default function Home() {
           onEmpty={() => go("upload")}
         />
       )}
-      {step === "review" && (
-        <ReviewStep
-          onSent={() => go("done")}
-          onRetry={() => go("processing")}
-        />
+      {(step === "review" || step === "done") && (
+        <ReviewStep onRetry={() => go("processing")} />
       )}
-      {step === "done" && <DoneStep onReset={() => go("upload")} />}
     </main>
   );
 }
