@@ -139,34 +139,38 @@ export default function PersonCard({
         </div>
       )}
 
-      <div className="mt-3 flex flex-col gap-2">
-        <input
-          type="text"
-          value={name}
-          placeholder="Add a name"
-          disabled={skipped}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onPersist}
-          className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none transition-colors focus:border-accent disabled:bg-neutral-50"
-        />
-        <button
-          onClick={onShare}
-          disabled={skipped || working}
-          className={`flex w-full items-center justify-center gap-2 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-60 ${
-            done
-              ? "bg-green-50 text-green-700 hover:bg-green-100"
-              : "bg-accent text-white hover:opacity-90"
-          }`}
-        >
-          {working && (
-            <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" />
-          )}
-          {actionLabel}
-        </button>
-        {!skipped && statusNote && (
-          <p className={`text-xs ${noteColor}`}>{statusNote}</p>
-        )}
-      </div>
+      {skipped ? (
+        <p className="mt-3 text-xs text-neutral-400">
+          Skipped — won&apos;t get a gallery. Tap{" "}
+          <span className="font-medium">Skipped</span> above to include them.
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-col gap-2">
+          <input
+            type="text"
+            value={name}
+            placeholder="Add a name"
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onPersist}
+            className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none transition-colors focus:border-accent"
+          />
+          <button
+            onClick={onShare}
+            disabled={working}
+            className={`flex w-full items-center justify-center gap-2 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-60 ${
+              done
+                ? "bg-green-50 text-green-700 hover:bg-green-100"
+                : "bg-accent text-white hover:opacity-90"
+            }`}
+          >
+            {working && (
+              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" />
+            )}
+            {actionLabel}
+          </button>
+          {statusNote && <p className={`text-xs ${noteColor}`}>{statusNote}</p>}
+        </div>
+      )}
     </div>
   );
 }
