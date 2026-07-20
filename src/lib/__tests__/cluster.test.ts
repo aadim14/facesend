@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyMergeLinks,
   CLUSTER_THRESHOLD,
+  SUGGEST_THRESHOLD,
   clusterDescriptors,
   euclideanDistance,
   IncrementalClusterer,
@@ -258,25 +259,34 @@ describe("suggestMerges", () => {
   }
 
   it("suggests pairs inside the uncertainty band", () => {
-    // distance 0.5: component delta = 0.5/sqrt(128)
-    const result = suggestMerges([group("a", 0.2), group("b", 0.2 + 0.5 * STEP)]);
+    // distance 0.45: a near-miss just above the 0.4 auto-merge cutoff, which
+    // is where a genuinely split person lands.
+    const result = suggestMerges([group("a", 0.2), group("b", 0.2 + 0.45 * STEP)]);
     expect(result).toHaveLength(1);
     expect([result[0].a, result[0].b].sort()).toEqual(["a", "b"]);
-    expect(result[0].distance).toBeCloseTo(0.5, 5);
+    expect(result[0].distance).toBeCloseTo(0.45, 5);
   });
 
-  it("ignores pairs below the auto-merge threshold and beyond the same-person bound", () => {
+  it("ignores pairs below the auto-merge threshold and beyond the suggest bound", () => {
     const close = suggestMerges([group("a", 0.2), group("b", 0.2 + 0.3 * STEP)]);
-    const far = suggestMerges([group("a", 0.2), group("b", 0.2 + 0.7 * STEP)]);
+    const far = suggestMerges([group("a", 0.2), group("b", 0.2 + 0.55 * STEP)]);
     expect(close).toHaveLength(0);
     expect(far).toHaveLength(0);
+  });
+
+  // Regression: the bound was 0.6, which in measurement swept in ~10% of all
+  // different-person pairs and buried real splits in false prompts.
+  it("does not prompt about a pair half a unit apart", () => {
+    expect(SUGGEST_THRESHOLD).toBe(0.5);
+    const result = suggestMerges([group("a", 0.2), group("b", 0.2 + 0.52 * STEP)]);
+    expect(result).toHaveLength(0);
   });
 
   it("orders multiple suggestions nearest first", () => {
     const result = suggestMerges([
       group("a", 0.2),
-      group("b", 0.2 + 0.58 * STEP),
-      group("c", 0.2 - 0.5 * STEP),
+      group("b", 0.2 + 0.48 * STEP),
+      group("c", 0.2 - 0.42 * STEP),
     ]);
     expect(result.length).toBeGreaterThanOrEqual(2);
     expect(result[0].distance).toBeLessThanOrEqual(result[1].distance);

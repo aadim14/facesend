@@ -90,13 +90,30 @@ export function smartEjectSet(
 }
 
 /**
- * Upper bound for "might be the same person" merge suggestions: the
- * canonical face-recognition same-person threshold. Cluster pairs whose
- * centroids land between CLUSTER_THRESHOLD (our deliberately strict
- * auto-merge cutoff) and this value are exactly the under-merges the
- * strict threshold knowingly produces.
+ * Upper bound for "might be the same person" merge suggestions. Pairs whose
+ * centroids land between CLUSTER_THRESHOLD (our strict auto-merge cutoff) and
+ * this value are the under-merges that strictness knowingly produces.
+ *
+ * Was 0.6, the canonical same-person threshold — far too permissive as a
+ * *prompt* threshold. Measured over 22 faces from 6 unrelated group photos,
+ * where all 231 pairs are known different people:
+ *
+ *   band          false prompts
+ *   [0.40, 0.60)  23
+ *   [0.40, 0.50)   3
+ *   [0.40, 0.45)   1
+ *
+ * The closest different-person pair sat at 0.444, and only 1% of them fell
+ * below 0.494. At 0.6 the app asked "same person?" 23 times about 22 distinct
+ * people — noise that trains the host to dismiss the prompt without reading
+ * it, which costs more than the splits it was meant to catch.
+ *
+ * 0.5 keeps the near-misses (a true split that failed auto-merge sits just
+ * above 0.4) and drops ~87% of the false prompts. Recall matters less than
+ * precision here: a missed suggestion still leaves two cards the host can see
+ * and merge, whereas a wrong suggestion actively wastes their attention.
  */
-export const SUGGEST_THRESHOLD = 0.6;
+export const SUGGEST_THRESHOLD = 0.5;
 
 export interface MergeSuggestion {
   a: string;
