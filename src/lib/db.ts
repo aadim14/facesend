@@ -65,10 +65,47 @@ export async function upgradeFaceSendDB(
 
 let dbPromise: Promise<IDBPDatabase<FaceSendDB>> | null = null;
 
+/**
+ * Open (or reuse) the database connection.
+ *
+ * The cached promise needs three escape hatches, because without them a
+ * single bad moment poisons the whole session:
+ *
+ * - `.catch` clearing the cache: a rejected open — private browsing, storage
+ *   blocked, a corrupt database — otherwise stayed cached as a rejected
+ *   promise, so every later call failed for the rest of the session even once
+ *   the cause had gone away. Retrying is cheap; being permanently dead is not.
+ *
+ * - `terminated`: the browser can force-close a connection (eviction, an
+ *   IndexedDB backend crash). The cache would keep handing out that dead
+ *   handle and every call would throw InvalidStateError forever.
+ *
+ * - `blocking`/`blocked`: on a future DB_VERSION bump, a second tab holding
+ *   the old connection blocks the upgrade. openDB's promise then neither
+ *   resolves nor rejects — and page.tsx only catches rejections, so the app
+ *   would sit on "Loading…" indefinitely with nothing to report. `blocking`
+ *   makes the old tab step aside instead.
+ */
 function getDB(): Promise<IDBPDatabase<FaceSendDB>> {
   if (!dbPromise) {
     dbPromise = openDB<FaceSendDB>(DB_NAME, DB_VERSION, {
       upgrade: upgradeFaceSendDB,
+      blocked() {
+        console.warn(
+          "[facesend] database upgrade is blocked by another open tab"
+        );
+      },
+      blocking() {
+        // Another tab wants to upgrade; release our handle so it can.
+        dbPromise?.then((db) => db.close()).catch(() => {});
+        dbPromise = null;
+      },
+      terminated() {
+        dbPromise = null;
+      },
+    }).catch((error) => {
+      dbPromise = null;
+      throw error;
     });
   }
   return dbPromise;
