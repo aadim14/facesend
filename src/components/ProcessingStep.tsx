@@ -7,6 +7,7 @@ import {
   addFaces,
   getAllFaces,
   getAllPhotos,
+  getClusters,
   replaceClusters,
   setPhotoFaceCount,
 } from "@/lib/db";
@@ -167,6 +168,19 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
 
       setPhase("clustering");
       const faces = await getAllFaces();
+
+      // What the host already told us, keyed by face. Clustering runs over
+      // every face from scratch each time, so without this every previously
+      // typed name is destroyed by any re-run — adding a second batch of
+      // photos, or retrying a failed one, silently wiped the whole roster.
+      const priorClusters = await getClusters();
+      const priorById = new Map(priorClusters.map((c) => [c.id, c]));
+      const priorByFace = new Map(
+        faces
+          .filter((f) => f.clusterId)
+          .map((f) => [f.id, priorById.get(f.clusterId!)])
+      );
+
       const grouped = clusterDescriptors(
         faces.map((f) => ({ faceId: f.id, descriptor: f.descriptor }))
       );
@@ -174,26 +188,44 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
       const assignments = new Map<string, string>();
       const recordById = new Map<string, ClusterRecord>();
       for (const group of grouped) {
+        // A regrouped cluster inherits from whichever prior person supplied
+        // most of its faces — a plurality vote, so one stray face migrating
+        // in can't rename someone. deliveredAt is deliberately not carried:
+        // the photo set changed, so a previous send no longer covers it.
+        const votes = new Map<string, number>();
+        for (const faceId of group.faceIds) {
+          const prior = priorByFace.get(faceId);
+          if (prior?.name) votes.set(prior.name, (votes.get(prior.name) ?? 0) + 1);
+        }
+        const inherited = [...votes.entries()].sort(
+          (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+        )[0]?.[0];
+
+        const skipped = group.faceIds.every(
+          (id) => priorByFace.get(id)?.skipped === true
+        );
+
         const record: ClusterRecord = {
           id: newId(),
-          name: "",
+          name: inherited ?? "",
           contact: {},
-          skipped: false,
+          skipped,
           deliveredAt: null,
         };
         records.push(record);
         recordById.set(record.id, record);
         for (const faceId of group.faceIds) assignments.set(faceId, record.id);
       }
-      // Carry names typed during processing into the final clusters: each
-      // name follows its anchor face into whichever cluster it ended up in.
+      // Names typed during *this* run win over inherited ones: they're the
+      // host's most recent intent. Each follows its anchor face into whichever
+      // cluster it ended up in.
       for (const [anchor, value] of Object.entries(namesRef.current)) {
         const name = value.trim();
         if (!name) continue;
         const clusterId = assignments.get(anchor);
         if (!clusterId) continue;
         const record = recordById.get(clusterId);
-        if (record && !record.name) record.name = name;
+        if (record) record.name = name;
       }
       await replaceClusters(records, assignments);
       onComplete();
