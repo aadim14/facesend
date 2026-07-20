@@ -9,12 +9,14 @@ import {
   getClusters,
   getFacesForCluster,
   getPhotosForCluster,
+  mergeClusters,
   putCluster,
   resetAll,
   retryFailedPhotos,
   splitCluster,
 } from "@/lib/db";
-import { smartEjectSet } from "@/lib/face/cluster";
+import { smartEjectSet, suggestMerges } from "@/lib/face/cluster";
+import type { MergeSuggestion } from "@/lib/face/cluster";
 import { newId } from "@/lib/id";
 import {
   deliverGallery,
@@ -23,6 +25,7 @@ import {
   prepareGalleryFile,
 } from "@/lib/share";
 import PersonCard from "@/components/PersonCard";
+import MergePrompt from "@/components/MergePrompt";
 import type { ClusterRecord, PhotoRecord } from "@/types";
 
 interface PersonView {
@@ -51,6 +54,12 @@ export default function ReviewStep({ onRetry }: Props) {
   // (a confirmed mobile share is persisted on the cluster as deliveredAt).
   const [statuses, setStatuses] = useState<Record<string, "downloaded" | "error">>({});
   const [canShare, setCanShare] = useState(false);
+  const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([]);
+  const [merging, setMerging] = useState(false);
+  // Pairs the host has said "different people" to. Session-scoped on purpose:
+  // re-clustering after an eject can legitimately change the answer, and a
+  // rejected pair reappearing once is cheaper than storing a permanent no.
+  const [rejectedPairs, setRejectedPairs] = useState<Set<string>>(new Set());
   const urlsRef = useRef<string[]>([]);
   // Pre-built gallery zips keyed by cluster id, so the Send tap can hand the
   // share sheet a ready File (preserving user activation on mobile). Warmed
@@ -115,6 +124,23 @@ export default function ReviewStep({ onRetry }: Props) {
         urlsRef.current.push(url);
         return { photo, url };
       });
+
+    // Pairs sitting in the band between our strict auto-merge cutoff and the
+    // canonical same-person threshold — i.e. exactly the splits the strict
+    // threshold knowingly creates. Skipped people are excluded; the host has
+    // already said they don't want a gallery for them.
+    setSuggestions(
+      suggestMerges(
+        views
+          .filter((v) => !v.cluster.skipped)
+          .map((v) => ({
+            clusterId: v.cluster.id,
+            descriptors: (byCluster.get(v.cluster.id) ?? []).map(
+              (f) => f.descriptor
+            ),
+          }))
+      )
+    );
 
     setPeople(views);
     setFailedCount(photos.filter((p) => p.faceCount === -2).length);
@@ -182,6 +208,47 @@ export default function ReviewStep({ onRetry }: Props) {
 
   async function toggleSkip(view: PersonView) {
     await persistCluster(view, { skipped: !view.cluster.skipped });
+  }
+
+  function pairKey(a: string, b: string): string {
+    return [a, b].sort().join("~");
+  }
+
+  /**
+   * Merge two cards that are the same person.
+   *
+   * The survivor is whichever card the host has already invested in: a typed
+   * name first, then the larger photo set. mergeClusters keeps the target's
+   * record, so choosing wrong would silently discard a name they typed.
+   */
+  async function acceptMerge(a: PersonView, b: PersonView) {
+    if (merging) return;
+    setMerging(true);
+    try {
+      const nameOf = (v: PersonView) =>
+        (names[v.cluster.id] ?? v.cluster.name).trim();
+      const [target, source] =
+        (nameOf(a) && !nameOf(b)) ||
+        (!!nameOf(a) === !!nameOf(b) && a.photoCount >= b.photoCount)
+          ? [a, b]
+          : [b, a];
+
+      // Persist the in-flight name first — mergeClusters writes the stored
+      // record, which wouldn't include a name still sitting in local state.
+      const name = nameOf(target);
+      if (name !== target.cluster.name) await persistCluster(target);
+
+      await mergeClusters(target.cluster.id, [source.cluster.id]);
+      galleryCache.current.delete(target.cluster.id); // photo set changed
+      galleryCache.current.delete(source.cluster.id);
+      await load();
+    } finally {
+      if (mounted.current) setMerging(false);
+    }
+  }
+
+  function rejectMerge(a: string, b: string) {
+    setRejectedPairs((prev) => new Set(prev).add(pairKey(a, b)));
   }
 
   async function ejectFace(view: PersonView, faceId: string) {
@@ -344,6 +411,20 @@ export default function ReviewStep({ onRetry }: Props) {
     );
   }
 
+  // Resolve suggestions against the current people list: a pair is live only
+  // if both cards still exist, neither is skipped, and the host hasn't already
+  // said they're different. One question at a time — a wall of "same person?"
+  // prompts is worse than the duplicates it's trying to fix.
+  const byId = new Map(people.map((p) => [p.cluster.id, p]));
+  const pendingSuggestions = suggestions
+    .filter((s) => !rejectedPairs.has(pairKey(s.a, s.b)))
+    .map((s) => ({ a: byId.get(s.a), b: byId.get(s.b), distance: s.distance }))
+    .filter(
+      (s): s is { a: PersonView; b: PersonView; distance: number } =>
+        s.a != null && s.b != null && !s.a.cluster.skipped && !s.b.cluster.skipped
+    );
+  const activeSuggestion = pendingSuggestions[0];
+
   const active = people.filter((p) => !p.cluster.skipped);
   const doneCount = active.filter((p) => isDone(p)).length;
   const allDone = active.length > 0 && doneCount === active.length;
@@ -394,6 +475,32 @@ export default function ReviewStep({ onRetry }: Props) {
             </p>
           </div>
         </div>
+      )}
+
+      {activeSuggestion && (
+        <MergePrompt
+          a={{
+            name: names[activeSuggestion.a.cluster.id] ?? "",
+            photoCount: activeSuggestion.a.photoCount,
+            crops: activeSuggestion.a.crops,
+          }}
+          b={{
+            name: names[activeSuggestion.b.cluster.id] ?? "",
+            photoCount: activeSuggestion.b.photoCount,
+            crops: activeSuggestion.b.crops,
+          }}
+          remaining={pendingSuggestions.length}
+          working={merging}
+          onMerge={() =>
+            acceptMerge(activeSuggestion.a, activeSuggestion.b)
+          }
+          onDismiss={() =>
+            rejectMerge(
+              activeSuggestion.a.cluster.id,
+              activeSuggestion.b.cluster.id
+            )
+          }
+        />
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
