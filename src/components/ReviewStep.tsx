@@ -52,7 +52,9 @@ export default function ReviewStep({ onRetry }: Props) {
   const [sharingId, setSharingId] = useState<string | null>(null);
   // Ephemeral per-session delivery outcome for the desktop download path
   // (a confirmed mobile share is persisted on the cluster as deliveredAt).
-  const [statuses, setStatuses] = useState<Record<string, "downloaded" | "error">>({});
+  const [statuses, setStatuses] = useState<
+    Record<string, "downloaded" | "error" | "missing">
+  >({});
   const [canShare, setCanShare] = useState(false);
   const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([]);
   const [merging, setMerging] = useState(false);
@@ -270,7 +272,10 @@ export default function ReviewStep({ onRetry }: Props) {
     await load();
   }
 
-  function setStatus(id: string, value: "downloaded" | "error" | null) {
+  function setStatus(
+    id: string,
+    value: "downloaded" | "error" | "missing" | null
+  ) {
     setStatuses((prev) => {
       const next = { ...prev };
       if (value) next[id] = value;
@@ -304,6 +309,13 @@ export default function ReviewStep({ onRetry }: Props) {
         // Not warmed yet: building the zip now would burn the click's
         // activation, so download directly instead of failing the share sheet.
         const photos = await getPhotosForCluster(id);
+        if (photos.length === 0) {
+          // Faces still point at this cluster but their photos are gone —
+          // evicted storage, or a half-finished reset. Say so rather than
+          // handing over an empty zip and calling it delivered.
+          setStatus(id, "missing");
+          return;
+        }
         const file = await prepareGalleryFile(name, photos);
         galleryCache.current.set(id, { name, file });
         downloadGallery(file);
@@ -336,13 +348,22 @@ export default function ReviewStep({ onRetry }: Props) {
 
   function actionLabel(view: PersonView): string {
     if (sharingId === view.cluster.id) return canShare ? "Opening share…" : "Preparing…";
-    if (isDone(view)) return canShare ? "Sent ✓ · Send again" : "Downloaded ✓ · Again";
+    // "Shared", not "Sent": handing a file to the OS share sheet is all this
+    // app can observe. Whether the host actually completed the send in
+    // Messages is not reported back to the page, so claiming "Sent" asserts
+    // something we don't know.
+    if (isDone(view)) return canShare ? "Shared ✓ · Share again" : "Downloaded ✓ · Again";
     return canShare ? "Share their photos" : "Download their gallery";
   }
 
   function noteFor(view: PersonView): { note?: string; tone: "ok" | "error" | "neutral" } {
     const id = view.cluster.id;
     if (statuses[id] === "error") return { note: "Couldn't send — try again.", tone: "error" };
+    if (statuses[id] === "missing")
+      return {
+        note: "Their photos are missing from this browser — try reprocessing.",
+        tone: "error",
+      };
     if (statuses[id] === "downloaded")
       return { note: "Downloaded ✓ — now send it to them.", tone: "ok" };
     if (view.cluster.deliveredAt != null) return { tone: "ok" };
