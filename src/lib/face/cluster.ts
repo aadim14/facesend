@@ -246,18 +246,52 @@ export function clusterDescriptors(
 
   // Pass 3: re-assign each face to its nearest final centroid. Recovers
   // borderline faces that greedily landed in a cluster whose centroid drifted.
+  //
+  // Two guards, with quite different track records:
+  //
+  //   - index < 0 fixes a *demonstrated* crash. It means every distance
+  //     compared false, which is what happens when a descriptor contains NaN
+  //     (a degenerate 1px crop, or a float16 WebGL readback). Pass 1 already
+  //     guarded this; pass 3 did not, so `reassigned[-1].push(...)` threw and
+  //     killed the run *after* every photo had been detected — the whole
+  //     session's work lost to a generic "something went wrong".
+  //
+  //   - `distance < threshold` is defence in depth, not a fixed bug. Pass 3
+  //     used to move every face to its globally nearest centroid regardless
+  //     of distance, which reads as a way to blend two people into one group.
+  //     A search over 20k randomised 128-d inputs found no case where it
+  //     actually changed the partition — a face's own centroid is essentially
+  //     always its nearest — so this is cheap insurance on an invariant the
+  //     file header claims, not a repair. Don't cite it as a bug fix.
   if (clusters.length > 1) {
     const byId = new Map(faces.map((f) => [f.faceId, f.descriptor]));
+    const home = new Map<string, number>();
+    clusters.forEach((c, i) => c.faceIds.forEach((id) => home.set(id, i)));
+
     const reassigned: string[][] = clusters.map(() => []);
     for (const face of faces) {
-      const { index } = nearestCluster(
-        byId.get(face.faceId)!,
-        clusters
-      );
-      reassigned[index].push(face.faceId);
+      const descriptor = byId.get(face.faceId)!;
+      const { index, distance } = nearestCluster(descriptor, clusters);
+      const target =
+        index >= 0 && distance < threshold
+          ? index
+          : (home.get(face.faceId) ?? -1);
+      if (target >= 0) reassigned[target].push(face.faceId);
     }
+
     for (let i = 0; i < clusters.length; i++) {
-      clusters[i] = { ...clusters[i], faceIds: reassigned[i] };
+      // Recompute the centroid: it has to describe the faces it ships with,
+      // or the result isn't a fixed point and any future consumer that trusts
+      // `centroid` reads a vector for a different set of faces.
+      const descriptors = reassigned[i]
+        .map((id) => byId.get(id))
+        .filter((d): d is Float32Array | number[] => d != null);
+      clusters[i] = {
+        faceIds: reassigned[i],
+        centroid: descriptors.length
+          ? meanDescriptor(descriptors)
+          : clusters[i].centroid,
+      };
     }
   }
 

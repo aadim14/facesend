@@ -4,6 +4,7 @@ import {
   clusterDescriptors,
   euclideanDistance,
   IncrementalClusterer,
+  meanDescriptor,
   smartEjectSet,
   suggestMerges,
 } from "@/lib/face/cluster";
@@ -84,8 +85,58 @@ describe("clusterDescriptors", () => {
   });
 
   it("uses a stricter-than-canonical default threshold", () => {
-    expect(CLUSTER_THRESHOLD).toBeLessThanOrEqual(0.55);
-    expect(CLUSTER_THRESHOLD).toBeGreaterThanOrEqual(0.4);
+    // Pinned exactly: the old range assertion passed for both 0.4 and 0.5,
+    // so it silently tolerated the README drifting to a different number.
+    expect(CLUSTER_THRESHOLD).toBe(0.4);
+  });
+
+  // Regression: pass 3 looked up each face's nearest centroid and pushed into
+  // `reassigned[index]` without checking index >= 0. A NaN component makes
+  // every distance comparison false, so index stayed -1 and the whole run
+  // threw — after every photo had already been detected.
+  it("survives a descriptor containing NaN instead of throwing", () => {
+    const poisoned = vec(0.5);
+    poisoned[7] = NaN;
+    const faces = [
+      { faceId: "a1", descriptor: vec(0) },
+      { faceId: "a2", descriptor: vec(0.01) },
+      { faceId: "b1", descriptor: vec(1) },
+      { faceId: "bad", descriptor: poisoned },
+    ];
+    expect(() => clusterDescriptors(faces)).not.toThrow();
+    // and the healthy faces still group correctly
+    const groups = clusterDescriptors(faces).map((c) => [...c.faceIds].sort());
+    expect(groups).toContainEqual(["a1", "a2"]);
+  });
+
+  it("never loses or duplicates a face", () => {
+    const faces = [
+      { faceId: "f1", descriptor: vec(0) },
+      { faceId: "f2", descriptor: vec(0.02) },
+      { faceId: "f3", descriptor: vec(0.5) },
+      { faceId: "f4", descriptor: vec(1) },
+      { faceId: "f5", descriptor: vec(1.01) },
+    ];
+    const out = clusterDescriptors(faces).flatMap((c) => c.faceIds);
+    expect(out.slice().sort()).toEqual(["f1", "f2", "f3", "f4", "f5"]);
+  });
+
+  // The returned centroid used to be carried over from before pass 3, so it
+  // described a different set of faces than the faceIds it shipped with.
+  it("returns a centroid that matches the faces it ships with", () => {
+    const faces = [
+      { faceId: "f1", descriptor: vec(0) },
+      { faceId: "f2", descriptor: vec(0.02) },
+      { faceId: "f3", descriptor: vec(1) },
+      { faceId: "f4", descriptor: vec(1.01) },
+    ];
+    const byId = new Map(faces.map((f) => [f.faceId, f.descriptor]));
+    for (const cluster of clusterDescriptors(faces)) {
+      const expected = meanDescriptor(
+        cluster.faceIds.map((id) => byId.get(id)!)
+      );
+      expect(euclideanDistance(cluster.centroid, expected)).toBeLessThan(1e-6);
+    }
   });
 });
 
