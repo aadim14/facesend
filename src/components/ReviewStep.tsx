@@ -582,7 +582,14 @@ export default function ReviewStep({ onRetry }: Props) {
 
       {/* progress */}
       <div className="mb-6">
-        <div className="h-2 overflow-hidden rounded-full bg-neutral-100">
+        <div
+          role="progressbar"
+          aria-valuenow={doneCount}
+          aria-valuemin={0}
+          aria-valuemax={active.length}
+          aria-label={canShare ? "People shared" : "Galleries downloaded"}
+          className="h-2 overflow-hidden rounded-full bg-neutral-100"
+        >
           <div
             className="h-full rounded-full bg-accent transition-all duration-500"
             style={{ width: `${pct}%` }}

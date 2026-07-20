@@ -113,7 +113,14 @@ export default function UploadStep({ onComplete }: Props) {
         <p className="text-sm font-medium">
           Importing {progress.done} / {progress.total}
         </p>
-        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-neutral-100">
+        <div
+          role="progressbar"
+          aria-valuenow={progress.done}
+          aria-valuemin={0}
+          aria-valuemax={progress.total}
+          aria-label="Importing photos"
+          className="h-1.5 w-64 overflow-hidden rounded-full bg-neutral-100"
+        >
           <div
             className="h-full rounded-full bg-accent transition-all"
             style={{ width: `${pct}%` }}
@@ -150,12 +157,13 @@ export default function UploadStep({ onComplete }: Props) {
           setDragActive(false);
           filesFromDrop(e.dataTransfer).then(handleFiles);
         }}
+        // Clicking anywhere in the zone is a convenience for pointer users.
+        // It is deliberately not role="button" + tabIndex: doing that made the
+        // whole zone one giant control with no accessible name, wrapped
+        // around a second nested control, which is invalid ARIA and announced
+        // as an unlabelled button. Keyboard and screen-reader users get the
+        // two real, named buttons inside instead.
         onClick={() => inputRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
-        }}
         className={`flex cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed px-6 py-20 transition-colors ${
           dragActive
             ? "border-accent bg-accent-soft"
@@ -176,29 +184,33 @@ export default function UploadStep({ onComplete }: Props) {
           />
         </svg>
         <p className="font-medium">Drag &amp; drop your event photos</p>
+        {/* Both options are real buttons. Previously "browse files" was a bare
+            span while "a whole folder" was a role="button" span, despite being
+            styled identically — so keyboard users could reach one and not the
+            other, with nothing to distinguish them visually. */}
         <p className="text-sm text-neutral-400">
           or{" "}
-          <span className="text-accent underline underline-offset-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              inputRef.current?.click();
+            }}
+            className="text-accent underline underline-offset-2 hover:opacity-80"
+          >
             browse files
-          </span>{" "}
+          </button>{" "}
           ·{" "}
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               folderInputRef.current?.click();
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.stopPropagation();
-                folderInputRef.current?.click();
-              }
-            }}
-            className="text-accent underline underline-offset-2"
+            className="text-accent underline underline-offset-2 hover:opacity-80"
           >
             a whole folder
-          </span>
+          </button>
         </p>
         <p className="mt-2 text-xs text-neutral-400">
           Up to {MAX_PHOTOS} photos · stays on this device

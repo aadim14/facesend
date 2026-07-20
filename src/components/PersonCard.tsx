@@ -178,6 +178,11 @@ export default function PersonCard({
             type="text"
             value={name}
             placeholder="Add a name"
+            // A placeholder is not a label: it disappears on focus and isn't
+            // reliably announced. Names the person by photo count so multiple
+            // cards aren't all announced identically as "Add a name".
+            aria-label={`Name for the person in ${photoCount} photo${photoCount === 1 ? "" : "s"}`}
+            autoComplete="off"
             onChange={(e) => onChange(e.target.value)}
             onBlur={onPersist}
             className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none transition-colors focus:border-accent"

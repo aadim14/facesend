@@ -293,7 +293,14 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
             </span>
           )}
         </p>
-        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-neutral-100">
+        <div
+          role="progressbar"
+          aria-valuenow={phase === "detecting" ? progress.done : undefined}
+          aria-valuemin={0}
+          aria-valuemax={progress.total}
+          aria-label={PHASE_LABEL[phase]}
+          className="h-1.5 w-64 overflow-hidden rounded-full bg-neutral-100"
+        >
           <div
             className={`h-full rounded-full bg-accent transition-all ${
               phase !== "detecting" ? "animate-pulse" : ""
@@ -341,7 +348,7 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
                     <img
                       key={i}
                       src={url}
-                      alt="face"
+                      alt=""
                       className="h-10 w-10 rounded-full border border-neutral-100 object-cover"
                     />
                   ))}
@@ -353,6 +360,8 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
                   type="text"
                   value={names[card.anchor] ?? ""}
                   placeholder="Name (optional)"
+                  aria-label={`Name for the person appearing in ${card.count} photos`}
+                  autoComplete="off"
                   onChange={(e) => setName(card.anchor, e.target.value)}
                   className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-1.5 text-sm outline-none transition-colors focus:border-accent"
                 />
