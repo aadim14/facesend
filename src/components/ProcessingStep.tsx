@@ -8,13 +8,18 @@ import {
   getAllFaces,
   getAllPhotos,
   getClusters,
+  getMergeLinks,
   replaceClusters,
   setPhotoFaceCount,
 } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { getActiveBackend, loadFaceApi } from "@/lib/face/models";
 import { detectFacesInPhoto } from "@/lib/face/detect";
-import { clusterDescriptors, IncrementalClusterer } from "@/lib/face/cluster";
+import {
+  applyMergeLinks,
+  clusterDescriptors,
+  IncrementalClusterer,
+} from "@/lib/face/cluster";
 import type { ClusterRecord } from "@/types";
 
 type Phase = "models" | "detecting" | "clustering";
@@ -181,8 +186,14 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
           .map((f) => [f.id, priorById.get(f.clusterId!)])
       );
 
-      const grouped = clusterDescriptors(
-        faces.map((f) => ({ faceId: f.id, descriptor: f.descriptor }))
+      // Re-apply merges the host already confirmed. Clustering is stateless
+      // across runs, so without this every correction is undone the moment new
+      // photos arrive.
+      const grouped = applyMergeLinks(
+        clusterDescriptors(
+          faces.map((f) => ({ faceId: f.id, descriptor: f.descriptor }))
+        ),
+        await getMergeLinks()
       );
       const records: ClusterRecord[] = [];
       const assignments = new Map<string, string>();

@@ -279,6 +279,35 @@ export async function setStep(step: Step): Promise<void> {
   await setMeta("step", step);
 }
 
+// ---- merge ledger ----
+
+const MERGE_LINKS_KEY = "mergeLinks";
+
+/**
+ * Pairs of face ids the host has confirmed belong to the same person.
+ *
+ * Clustering re-runs from scratch over every face whenever new photos arrive,
+ * which silently undid every merge the host had already done. These are kept
+ * as face ids rather than cluster ids because cluster ids are regenerated on
+ * every run, whereas a face id is stable for the life of the photo.
+ *
+ * One link per merge is enough: they're applied as a union-find, so
+ * same-person relationships compose transitively.
+ */
+export async function getMergeLinks(): Promise<[string, string][]> {
+  return (await getMeta<[string, string][]>(MERGE_LINKS_KEY)) ?? [];
+}
+
+export async function addMergeLink(a: string, b: string): Promise<void> {
+  if (!a || !b || a === b) return;
+  const links = await getMergeLinks();
+  const exists = links.some(
+    ([x, y]) => (x === a && y === b) || (x === b && y === a)
+  );
+  if (exists) return;
+  await setMeta(MERGE_LINKS_KEY, [...links, [a, b]]);
+}
+
 // ---- lifecycle ----
 
 export async function resetAll(): Promise<void> {

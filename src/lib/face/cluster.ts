@@ -134,6 +134,79 @@ export function suggestMerges(
   return out.sort((x, y) => x.distance - y.distance);
 }
 
+/**
+ * Fold host-confirmed same-person links into a clustering result.
+ *
+ * Clustering re-runs over every face whenever photos are added, so without
+ * this a merge the host explicitly confirmed is silently undone by the next
+ * run. Links are applied as a union-find over the produced clusters: any two
+ * clusters holding linked faces become one, transitively.
+ *
+ * Links naming faces that no longer exist (ejected, or their photo deleted)
+ * are ignored rather than treated as an error — the ledger is a set of hints
+ * about people, not a referential-integrity constraint.
+ */
+export function applyMergeLinks(
+  clusters: DescriptorCluster[],
+  links: [string, string][]
+): DescriptorCluster[] {
+  if (links.length === 0 || clusters.length < 2) return clusters;
+
+  const clusterOfFace = new Map<string, number>();
+  clusters.forEach((c, i) => c.faceIds.forEach((id) => clusterOfFace.set(id, i)));
+
+  const parent = clusters.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  const union = (i: number, j: number) => {
+    const a = find(i);
+    const b = find(j);
+    if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+  };
+
+  let joined = false;
+  for (const [a, b] of links) {
+    const ia = clusterOfFace.get(a);
+    const ib = clusterOfFace.get(b);
+    if (ia == null || ib == null || find(ia) === find(ib)) continue;
+    union(ia, ib);
+    joined = true;
+  }
+  if (!joined) return clusters;
+
+  const merged = new Map<number, DescriptorCluster[]>();
+  clusters.forEach((c, i) => {
+    const root = find(i);
+    merged.set(root, [...(merged.get(root) ?? []), c]);
+  });
+
+  return [...merged.values()]
+    .map((members) => {
+      const faceIds = members.flatMap((m) => m.faceIds);
+      // Weighted mean of the member centroids — the mean of the union, without
+      // needing the descriptors back. A centroid must describe the faces it
+      // ships with; carrying one member's centroid over would be a lie.
+      const centroid = new Float32Array(members[0].centroid.length);
+      for (const m of members) {
+        for (let i = 0; i < centroid.length; i++) {
+          centroid[i] += m.centroid[i] * m.faceIds.length;
+        }
+      }
+      for (let i = 0; i < centroid.length; i++) centroid[i] /= faceIds.length;
+      return { faceIds, centroid };
+    })
+    .sort(
+      (a, b) =>
+        b.faceIds.length - a.faceIds.length ||
+        a.faceIds[0].localeCompare(b.faceIds[0])
+    );
+}
+
 interface MutableCluster {
   faceIds: string[];
   centroid: Float32Array;

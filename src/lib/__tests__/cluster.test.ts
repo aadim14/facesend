@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyMergeLinks,
   CLUSTER_THRESHOLD,
   clusterDescriptors,
   euclideanDistance,
@@ -137,6 +138,57 @@ describe("clusterDescriptors", () => {
       );
       expect(euclideanDistance(cluster.centroid, expected)).toBeLessThan(1e-6);
     }
+  });
+});
+
+describe("applyMergeLinks", () => {
+  const clusters = () => [
+    { faceIds: ["a1", "a2"], centroid: vec(0) },
+    { faceIds: ["b1"], centroid: vec(1) },
+    { faceIds: ["c1", "c2"], centroid: vec(2) },
+  ];
+
+  it("is a no-op with no links", () => {
+    expect(applyMergeLinks(clusters(), [])).toEqual(clusters());
+  });
+
+  it("ignores links naming faces that no longer exist", () => {
+    // An ejected face, or one whose photo was deleted: a hint, not a
+    // referential-integrity constraint.
+    expect(applyMergeLinks(clusters(), [["a1", "ghost"]])).toEqual(clusters());
+  });
+
+  it("joins the two clusters a link spans", () => {
+    const out = applyMergeLinks(clusters(), [["a1", "b1"]]);
+    expect(out).toHaveLength(2);
+    expect(out[0].faceIds.sort()).toEqual(["a1", "a2", "b1"]);
+  });
+
+  it("composes transitively", () => {
+    // a~b and b~c means all three are one person, without an explicit a~c.
+    const out = applyMergeLinks(clusters(), [
+      ["a1", "b1"],
+      ["b1", "c1"],
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].faceIds.sort()).toEqual(["a1", "a2", "b1", "c1", "c2"]);
+  });
+
+  it("gives the joined cluster a centroid describing all of its faces", () => {
+    // Weighted mean of [0,0] (2 faces) and [1] (1 face) = 1/3.
+    const out = applyMergeLinks(clusters(), [["a1", "b1"]]);
+    expect(out[0].centroid[0]).toBeCloseTo(1 / 3, 6);
+  });
+
+  it("never loses a face", () => {
+    const out = applyMergeLinks(clusters(), [["a1", "c2"]]);
+    expect(out.flatMap((c) => c.faceIds).sort()).toEqual([
+      "a1",
+      "a2",
+      "b1",
+      "c1",
+      "c2",
+    ]);
   });
 });
 

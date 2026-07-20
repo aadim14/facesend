@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  addMergeLink,
   getAllFaces,
   getAllPhotos,
   getClusters,
@@ -241,6 +242,13 @@ export default function ReviewStep({ onRetry }: Props) {
       if (name !== target.cluster.name) await persistCluster(target);
 
       await mergeClusters(target.cluster.id, [source.cluster.id]);
+      // Record the decision against face ids, which survive re-clustering —
+      // otherwise the next run (adding photos, retrying a failure) silently
+      // splits these two apart again and re-asks the same question.
+      const anchorA = target.crops[0]?.faceId;
+      const anchorB = source.crops[0]?.faceId;
+      if (anchorA && anchorB) await addMergeLink(anchorA, anchorB);
+
       galleryCache.current.delete(target.cluster.id); // photo set changed
       galleryCache.current.delete(source.cluster.id);
       await load();
