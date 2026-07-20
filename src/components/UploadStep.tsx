@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { addPhoto, requestPersistence } from "@/lib/db";
-import { newId } from "@/lib/id";
-import { makeThumbnail } from "@/lib/images";
-
-const MAX_PHOTOS = 300;
+import { importPhotos, MAX_PHOTOS } from "@/lib/import";
 
 interface Props {
   onComplete: () => void;
@@ -86,61 +82,25 @@ export default function UploadStep({ onComplete }: Props) {
 
   async function handleFiles(fileList: FileList | File[]) {
     if (importing) return;
-    const all = Array.from(fileList);
-    const images = all.filter((f) => f.type.startsWith("image/"));
-    const kept = images.slice(0, MAX_PHOTOS);
-
-    const notices: string[] = [];
-    if (all.length - images.length > 0) {
-      notices.push(`${all.length - images.length} non-image file(s) skipped`);
-    }
-    if (images.length > MAX_PHOTOS) {
-      notices.push(`keeping the first ${MAX_PHOTOS} of ${images.length} photos`);
-    }
-
-    if (kept.length === 0) {
-      setNotice("Those files don't look like photos — try JPG or PNG images.");
-      return;
-    }
-
     setImporting(true);
-    setProgress({ done: 0, total: kept.length });
+    setNotice(null);
 
-    let imported = 0;
-    let unreadable = 0;
-    for (const file of kept) {
-      try {
-        const { thumbBlob, width, height } = await makeThumbnail(file);
-        await addPhoto({
-          id: newId(),
-          name: file.name,
-          blob: file,
-          thumbBlob,
-          width,
-          height,
-          faceCount: -1,
-        });
-        imported++;
-      } catch (err) {
-        console.warn(`[facesend] couldn't import ${file.name}:`, err);
-        unreadable++;
-      }
-      setProgress({ done: imported + unreadable, total: kept.length });
-    }
-
-    if (unreadable > 0) {
-      notices.push(`${unreadable} photo(s) couldn't be read and were skipped`);
-    }
+    const { imported, notices, storageFull } = await importPhotos(fileList, {
+      onProgress: setProgress,
+    });
 
     if (imported === 0) {
       setImporting(false);
       setNotice(
-        "None of those photos could be read in this browser. HEIC files work in Safari; try JPG or PNG elsewhere."
+        storageFull
+          ? "There's no room left in this browser's storage for these photos."
+          : notices.length > 0
+            ? notices.join(" · ")
+            : "None of those photos could be read in this browser. HEIC files work in Safari; try JPG or PNG elsewhere."
       );
       return;
     }
 
-    await requestPersistence();
     if (notices.length > 0) setNotice(notices.join(" · "));
     onComplete();
   }

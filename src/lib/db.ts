@@ -77,9 +77,29 @@ function getDB(): Promise<IDBPDatabase<FaceSendDB>> {
 // ---- photos ----
 
 /** One photo per transaction (large Blobs in a single giant transaction are flaky on iOS Safari). */
+/**
+ * Storage is full. Distinguished from a generic write failure because the two
+ * need opposite responses: an unreadable photo means skip it and carry on, a
+ * full disk means stop immediately — every remaining write will fail the same
+ * way, and telling the host their JPEGs are corrupt is simply wrong.
+ */
+export class StorageFullError extends Error {
+  constructor() {
+    super("Storage is full");
+    this.name = "StorageFullError";
+  }
+}
+
 export async function addPhoto(photo: PhotoRecord): Promise<void> {
   const db = await getDB();
-  await db.put("photos", photo);
+  try {
+    await db.put("photos", photo);
+  } catch (error) {
+    if ((error as DOMException)?.name === "QuotaExceededError") {
+      throw new StorageFullError();
+    }
+    throw error;
+  }
 }
 
 export async function getPhoto(id: string): Promise<PhotoRecord | undefined> {
