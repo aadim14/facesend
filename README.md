@@ -23,9 +23,9 @@ npm run build    # production build
 ## How it works
 
 1. **Upload** — photos are imported into IndexedDB with generated thumbnails.
-2. **Detect** — each photo is downscaled to ≤800 px and run through face detection, landmarks, and descriptor extraction (~12 MB of model weights served from `public/models`).
-3. **Cluster** — greedy centroid clustering over the 128-d descriptors at a Euclidean threshold of 0.50, deliberately strict: the UI lets you merge two cards of the same person, but never has to split a bad merge.
-4. **Tag** — one card per person with sample face crops; name + phone/email, merge, or skip.
+2. **Detect** — each photo is downscaled to ≤640 px for detection, then each face is re-read from a higher-resolution crop of the original for its descriptor (~12 MB of model weights served from `public/models`).
+3. **Cluster** — greedy centroid assignment over the 128-d descriptors, then a merge pass and a re-assignment pass, at a Euclidean threshold of 0.4. That is deliberately stricter than the canonical 0.6: splitting one person across two cards is recoverable, blending two people into one is not.
+4. **Tag** — one card per person with sample face crops; name, merge duplicates, eject a stray face, or skip.
 5. **Deliver** — each person's photos are packed into one zip containing an `index.html` that renders the gallery offline, then handed to the OS share sheet ([client-zip](https://github.com/Touffy/client-zip)). It has to be a single zip rather than loose files: Web Share flattens a file array, which would break the relative `photos/…` references.
 
 ### Design constraint
