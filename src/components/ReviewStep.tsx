@@ -67,6 +67,12 @@ export default function ReviewStep({ onRetry }: Props) {
   const [photoTotal, setPhotoTotal] = useState(0);
   const [adding, setAdding] = useState(false);
   const [addNotice, setAddNotice] = useState<string | null>(null);
+  // Full face list for one expanded card; object URLs here are owned by
+  // toggleExpand and revoked as soon as the card collapses or another opens.
+  const [expanded, setExpanded] = useState<{
+    id: string;
+    crops: { faceId: string; url: string }[];
+  } | null>(null);
   const addInputRef = useRef<HTMLInputElement>(null);
   const urlsRef = useRef<string[]>([]);
   // Pre-built gallery zips keyed by cluster id, so the Send tap can hand the
@@ -150,6 +156,7 @@ export default function ReviewStep({ onRetry }: Props) {
       )
     );
 
+    setExpanded(null);
     setPeople(views);
     setPhotoTotal(photos.length);
     setFailedCount(photos.filter((p) => p.faceCount === -2).length);
@@ -265,6 +272,32 @@ export default function ReviewStep({ onRetry }: Props) {
 
   function rejectMerge(a: string, b: string) {
     setRejectedPairs((prev) => new Set(prev).add(pairKey(a, b)));
+  }
+
+  /**
+   * Load every face in a group so any of them can be ejected.
+   *
+   * Fetched on demand rather than up front: creating an object URL per face
+   * for every person would pin every crop blob in memory for the whole
+   * session, and the overwhelming majority are never looked at.
+   */
+  async function toggleExpand(view: PersonView) {
+    const id = view.cluster.id;
+    if (expanded?.id === id) {
+      expanded.crops.forEach((c) => URL.revokeObjectURL(c.url));
+      setExpanded(null);
+      return;
+    }
+    expanded?.crops.forEach((c) => URL.revokeObjectURL(c.url));
+    const faces = await getFacesForCluster(id);
+    if (!mounted.current) return;
+    setExpanded({
+      id,
+      crops: faces.map((f) => ({
+        faceId: f.id,
+        url: URL.createObjectURL(f.cropBlob),
+      })),
+    });
   }
 
   async function ejectFace(view: PersonView, faceId: string) {
@@ -612,6 +645,11 @@ export default function ReviewStep({ onRetry }: Props) {
             <PersonCard
               key={view.cluster.id}
               crops={view.crops}
+              expandedCrops={
+                expanded?.id === view.cluster.id ? expanded.crops : null
+              }
+              faceCount={view.faceCount}
+              onToggleExpand={() => toggleExpand(view)}
               photoCount={view.photoCount}
               name={names[view.cluster.id] ?? ""}
               skipped={view.cluster.skipped}
