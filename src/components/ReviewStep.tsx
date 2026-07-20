@@ -19,6 +19,7 @@ import {
 import { smartEjectSet, suggestMerges } from "@/lib/face/cluster";
 import type { MergeSuggestion } from "@/lib/face/cluster";
 import { newId } from "@/lib/id";
+import { importPhotos, MAX_PHOTOS } from "@/lib/import";
 import {
   deliverGallery,
   downloadGallery,
@@ -63,6 +64,10 @@ export default function ReviewStep({ onRetry }: Props) {
   // re-clustering after an eject can legitimately change the answer, and a
   // rejected pair reappearing once is cheaper than storing a permanent no.
   const [rejectedPairs, setRejectedPairs] = useState<Set<string>>(new Set());
+  const [photoTotal, setPhotoTotal] = useState(0);
+  const [adding, setAdding] = useState(false);
+  const [addNotice, setAddNotice] = useState<string | null>(null);
+  const addInputRef = useRef<HTMLInputElement>(null);
   const urlsRef = useRef<string[]>([]);
   // Pre-built gallery zips keyed by cluster id, so the Send tap can hand the
   // share sheet a ready File (preserving user activation on mobile). Warmed
@@ -146,6 +151,7 @@ export default function ReviewStep({ onRetry }: Props) {
     );
 
     setPeople(views);
+    setPhotoTotal(photos.length);
     setFailedCount(photos.filter((p) => p.faceCount === -2).length);
     setNoFacePhotos(noFaces);
     setNames((prev) => {
@@ -344,6 +350,37 @@ export default function ReviewStep({ onRetry }: Props) {
     else setRetrying(false);
   }
 
+  /**
+   * Add a second batch of photos to the event already in progress.
+   *
+   * Until now the only route out of this screen was startOver(), which
+   * deletes everything — so a host who took more photos, or who imported
+   * half the camera roll by mistake, had to re-run detection over the whole
+   * set and re-type every name. New photos land as unprocessed and
+   * ProcessingStep detects only those, then re-clusters; names and confirmed
+   * merges survive that (see the merge ledger and name inheritance).
+   */
+  async function addMorePhotos(fileList: FileList | File[]) {
+    if (adding) return;
+    setAdding(true);
+    try {
+      const { imported, notices, storageFull } = await importPhotos(fileList, {
+        budget: MAX_PHOTOS - photoTotal,
+      });
+      if (imported > 0) {
+        onRetry(); // -> processing, which picks up only the unprocessed photos
+        return;
+      }
+      setAddNotice(
+        storageFull
+          ? "There's no room left in this browser's storage."
+          : notices.join(" · ") || "Those files don't look like photos."
+      );
+    } finally {
+      if (mounted.current) setAdding(false);
+    }
+  }
+
   async function startOver() {
     if (!window.confirm("Delete all photos and people from this browser?")) return;
     await resetAll();
@@ -377,6 +414,36 @@ export default function ReviewStep({ onRetry }: Props) {
     if (view.cluster.deliveredAt != null) return { tone: "ok" };
     return { tone: "neutral" };
   }
+
+  const atPhotoLimit = photoTotal >= MAX_PHOTOS;
+
+  /** Shared by the empty state and the footer — both need a way forward. */
+  const addPhotosControl = (
+    <>
+      <button
+        onClick={() => addInputRef.current?.click()}
+        disabled={adding || atPhotoLimit}
+        className="text-sm font-medium text-accent underline underline-offset-4 hover:opacity-80 disabled:opacity-40"
+      >
+        {adding
+          ? "Adding…"
+          : atPhotoLimit
+            ? `At the ${MAX_PHOTOS}-photo limit`
+            : "Add more photos"}
+      </button>
+      <input
+        ref={addInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files) addMorePhotos(e.target.files);
+          e.target.value = "";
+        }}
+      />
+    </>
+  );
 
   if (loading) {
     return (
@@ -426,10 +493,16 @@ export default function ReviewStep({ onRetry }: Props) {
             <p className="font-medium">No faces found in these photos</p>
             <p className="max-w-sm text-sm text-neutral-500">
               FaceSend groups photos by the people in them, and it couldn&apos;t spot
-              any faces here.
+              any faces in {photoTotal === 1 ? "this photo" : `these ${photoTotal} photos`}.
+              Adding shots where faces are larger or better lit usually helps.
             </p>
           </>
         )}
+        {/* This screen used to offer nothing but "Start over", which deletes
+            every imported photo — a dead end for the one case where the host
+            has the most to lose. */}
+        {addPhotosControl}
+        {addNotice && <p className="text-xs text-amber-600">{addNotice}</p>}
         <button
           onClick={startOver}
           className="text-sm text-neutral-400 underline underline-offset-4 hover:text-neutral-600"
@@ -585,10 +658,16 @@ export default function ReviewStep({ onRetry }: Props) {
         </div>
       )}
 
-      <div className="mt-12 text-center">
+      <div className="mt-12 flex flex-col items-center gap-3 text-center">
+        {addPhotosControl}
+        {addNotice && <p className="text-xs text-amber-600">{addNotice}</p>}
+        <p className="text-xs text-neutral-400">
+          {photoTotal} photo{photoTotal === 1 ? "" : "s"} in this event · names
+          and merges are kept when you add more
+        </p>
         <button
           onClick={startOver}
-          className="text-sm text-neutral-400 underline underline-offset-4 hover:text-neutral-600"
+          className="mt-2 text-sm text-neutral-400 underline underline-offset-4 hover:text-neutral-600"
         >
           Start over with new photos
         </button>
