@@ -1,4 +1,10 @@
-import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import {
+  openDB,
+  type DBSchema,
+  type IDBPDatabase,
+  type IDBPTransaction,
+  type StoreNames,
+} from "idb";
 import type {
   ClusterRecord,
   FaceRecord,
@@ -18,21 +24,51 @@ interface FaceSendDB extends DBSchema {
 }
 
 const DB_NAME = "facesend";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+
+/**
+ * Schema evolution. Exported so migrations are unit-testable against a
+ * throwaway database. Each version bump lands as a gated block; a returning
+ * host on v1 walks straight through to the current version.
+ */
+export async function upgradeFaceSendDB(
+  db: IDBPDatabase<FaceSendDB>,
+  oldVersion: number,
+  _newVersion: number | null,
+  tx: IDBPTransaction<FaceSendDB, ArrayLike<StoreNames<FaceSendDB>>, "versionchange">
+): Promise<void> {
+  if (oldVersion < 1) {
+    db.createObjectStore("photos", { keyPath: "id" });
+    const faces = db.createObjectStore("faces", { keyPath: "id" });
+    faces.createIndex("by-photo", "photoId");
+    faces.createIndex("by-cluster", "clusterId");
+    db.createObjectStore("clusters", { keyPath: "id" });
+    db.createObjectStore("meta");
+  }
+  if (oldVersion < 2) {
+    // Replace the optimistic `sent` boolean with a confirmed-only
+    // `deliveredAt`. Reset every cluster to null: the old flag couldn't
+    // distinguish a real send from a zip that merely downloaded, so it's
+    // not trustworthy to carry forward — hosts re-confirm delivery.
+    const store = tx.objectStore("clusters");
+    let cursor = await store.openCursor();
+    while (cursor) {
+      const migrated = { ...cursor.value, deliveredAt: null } as ClusterRecord & {
+        sent?: boolean;
+      };
+      delete migrated.sent;
+      cursor.update(migrated);
+      cursor = await cursor.continue();
+    }
+  }
+}
 
 let dbPromise: Promise<IDBPDatabase<FaceSendDB>> | null = null;
 
 function getDB(): Promise<IDBPDatabase<FaceSendDB>> {
   if (!dbPromise) {
     dbPromise = openDB<FaceSendDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        db.createObjectStore("photos", { keyPath: "id" });
-        const faces = db.createObjectStore("faces", { keyPath: "id" });
-        faces.createIndex("by-photo", "photoId");
-        faces.createIndex("by-cluster", "clusterId");
-        db.createObjectStore("clusters", { keyPath: "id" });
-        db.createObjectStore("meta");
-      },
+      upgrade: upgradeFaceSendDB,
     });
   }
   return dbPromise;
@@ -69,6 +105,26 @@ export async function setPhotoFaceCount(
     await tx.store.put(photo);
   }
   await tx.done;
+}
+
+/**
+ * Reset photos that failed to process (faceCount -2) back to unprocessed (-1)
+ * so a retry re-runs only them. Returns how many were reset.
+ */
+export async function retryFailedPhotos(): Promise<number> {
+  const db = await getDB();
+  const tx = db.transaction("photos", "readwrite");
+  let reset = 0;
+  let cursor = await tx.store.openCursor();
+  while (cursor) {
+    if (cursor.value.faceCount === -2) {
+      cursor.update({ ...cursor.value, faceCount: -1 });
+      reset++;
+    }
+    cursor = await cursor.continue();
+  }
+  await tx.done;
+  return reset;
 }
 
 // ---- faces ----

@@ -7,7 +7,11 @@ export interface PhotoRecord {
   thumbBlob: Blob;
   width: number;
   height: number;
-  /** -1 = not yet processed, 0 = no faces found (or undecodable), >0 = faces found */
+  /**
+   * -2 = processing failed (decode/detection threw), -1 = not yet processed,
+   * 0 = genuinely no faces found, >0 = faces found. -2 is distinct from 0 so a
+   * failure surfaces as retryable rather than silently landing in "No faces".
+   */
   faceCount: number;
 }
 
@@ -38,5 +42,12 @@ export interface ClusterRecord {
   name: string;
   contact: ContactInfo;
   skipped: boolean;
-  sent: boolean;
+  /**
+   * Epoch ms of a *confirmed* delivery, or null if not delivered. Confirmed
+   * means the OS share sheet resolved — a cancelled share or a zip that only
+   * downloaded never sets this. Replaces the old optimistic `sent` boolean.
+   */
+  deliveredAt: number | null;
+  /** Last delivery failure message, surfaced to the host; cleared on success. */
+  deliveryError?: string;
 }

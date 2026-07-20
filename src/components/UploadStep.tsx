@@ -173,8 +173,9 @@ export default function UploadStep({ onComplete }: Props) {
           Send event photos to the right people
         </h2>
         <p className="mt-3 text-neutral-500">
-          Drop your photos, tag each face once, and get a private page per
-          person. Everything happens in your browser.
+          Drop your photos. FaceSend groups them by who&apos;s in each shot, then
+          gives each person their own gallery to keep. Everything happens on your
+          device — nothing is uploaded.
         </p>
       </div>
 

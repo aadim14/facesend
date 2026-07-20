@@ -31,23 +31,31 @@ export interface ZipEntry {
   blob: Blob;
 }
 
-interface SaveFilePickerWindow extends Window {
-  showSaveFilePicker?: (options: {
-    suggestedName?: string;
-    types?: { description: string; accept: Record<string, string[]> }[];
-  }) => Promise<{
-    createWritable: () => Promise<{
-      write: (chunk: unknown) => Promise<void>;
-      close: () => Promise<void>;
-    }>;
-  }>;
+/**
+ * Save a ready-made zip Blob to disk as `zipName` via an anchor download.
+ *
+ * Deliberately NOT using `showSaveFilePicker`: that API requires transient
+ * user activation, which is gone by the time we've built and zipped the
+ * gallery — it then throws AbortError, which is indistinguishable from a real
+ * cancel and made "Send" silently do nothing. An anchor download needs no
+ * activation and works in every browser, so delivery is reliable. Always
+ * returns true (the download is initiated synchronously; there is no cancel).
+ */
+export function saveZipBlob(zipName: string, blob: Blob): boolean {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = zipName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  return true;
 }
 
 /**
  * Zip the given photos (store-only — JPEGs don't recompress) and save as
- * `<person>-photos.zip`. Streams to disk where the File System Access API
- * exists; falls back to a Blob download elsewhere.
- * Returns false when the user cancelled the save dialog.
+ * `<person>-photos.zip`. Returns false when the user cancelled the save dialog.
  */
 export async function downloadAllAsZip(
   personName: string,
@@ -59,40 +67,6 @@ export async function downloadAllAsZip(
     name: names[i],
     input: entry.blob,
   }));
-  const zipName = `${sanitizeFilename(personName)}-photos.zip`;
-
-  const picker = (window as SaveFilePickerWindow).showSaveFilePicker;
-  if (picker) {
-    try {
-      const handle = await picker({
-        suggestedName: zipName,
-        types: [
-          { description: "ZIP archive", accept: { "application/zip": [".zip"] } },
-        ],
-      });
-      const writable = await handle.createWritable();
-      const response = downloadZip(files);
-      await response.body?.pipeTo(
-        new WritableStream({
-          write: (chunk) => writable.write(chunk),
-          close: () => writable.close(),
-        })
-      );
-      return true;
-    } catch (error) {
-      if ((error as DOMException)?.name === "AbortError") return false; // user cancelled
-      // fall through to the Blob path on any other picker failure
-    }
-  }
-
   const blob = await downloadZip(files).blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = zipName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  return true;
+  return saveZipBlob(`${sanitizeFilename(personName)}-photos.zip`, blob);
 }

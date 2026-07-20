@@ -14,8 +14,14 @@ interface Props {
   photoCount: number;
   name: string;
   skipped: boolean;
-  sent: boolean;
-  sharing: boolean;
+  /** Done for this session — delivered (shared) or downloaded. */
+  done: boolean;
+  working: boolean;
+  /** Honest, device-aware button label supplied by the parent. */
+  actionLabel: string;
+  /** Sub-status under the button: a download note or an error. */
+  statusNote?: string;
+  statusTone?: "neutral" | "ok" | "error";
   canEject: boolean;
   onChange: (value: string) => void;
   onPersist: () => void;
@@ -29,8 +35,11 @@ export default function PersonCard({
   photoCount,
   name,
   skipped,
-  sent,
-  sharing,
+  done,
+  working,
+  actionLabel,
+  statusNote,
+  statusTone = "neutral",
   canEject,
   onChange,
   onPersist,
@@ -46,10 +55,21 @@ export default function PersonCard({
     setConfirmFaceId((current) => (current === faceId ? null : faceId));
   }
 
+  const noteColor =
+    statusTone === "error"
+      ? "text-red-600"
+      : statusTone === "ok"
+        ? "text-green-600"
+        : "text-neutral-400";
+
   return (
     <div
-      className={`relative rounded-2xl border border-neutral-200 p-4 transition-all ${
-        skipped ? "opacity-50" : ""
+      className={`relative rounded-2xl border p-4 transition-all ${
+        skipped
+          ? "border-neutral-200 opacity-50"
+          : done
+            ? "border-green-200 bg-green-50/40"
+            : "border-neutral-200"
       }`}
     >
       <button
@@ -119,28 +139,38 @@ export default function PersonCard({
         </div>
       )}
 
-      <div className="mt-3 flex flex-col gap-2">
-        <input
-          type="text"
-          value={name}
-          placeholder="Name (optional)"
-          disabled={skipped}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onPersist}
-          className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none transition-colors focus:border-accent disabled:bg-neutral-50"
-        />
-        <button
-          onClick={onShare}
-          disabled={skipped || sharing}
-          className={`w-full rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
-            sent
-              ? "bg-green-50 text-green-700 hover:bg-green-100"
-              : "bg-accent text-white hover:opacity-90"
-          }`}
-        >
-          {sharing ? "Sharing…" : sent ? "Shared ✓ · Share again" : "Share photos"}
-        </button>
-      </div>
+      {skipped ? (
+        <p className="mt-3 text-xs text-neutral-400">
+          Skipped — won&apos;t get a gallery. Tap{" "}
+          <span className="font-medium">Skipped</span> above to include them.
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-col gap-2">
+          <input
+            type="text"
+            value={name}
+            placeholder="Add a name"
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onPersist}
+            className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none transition-colors focus:border-accent"
+          />
+          <button
+            onClick={onShare}
+            disabled={working}
+            className={`flex w-full items-center justify-center gap-2 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-60 ${
+              done
+                ? "bg-green-50 text-green-700 hover:bg-green-100"
+                : "bg-accent text-white hover:opacity-90"
+            }`}
+          >
+            {working && (
+              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" />
+            )}
+            {actionLabel}
+          </button>
+          {statusNote && <p className={`text-xs ${noteColor}`}>{statusNote}</p>}
+        </div>
+      )}
     </div>
   );
 }
