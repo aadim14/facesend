@@ -11,6 +11,11 @@ interface FaceCrop {
 
 interface Props {
   crops: FaceCrop[];
+  /** Every face in the group, fetched on demand; null while collapsed. */
+  expandedCrops: FaceCrop[] | null;
+  /** Total faces in the group, which may exceed the preview. */
+  faceCount: number;
+  onToggleExpand: () => void;
   photoCount: number;
   name: string;
   skipped: boolean;
@@ -32,6 +37,9 @@ interface Props {
 
 export default function PersonCard({
   crops,
+  expandedCrops,
+  faceCount,
+  onToggleExpand,
   photoCount,
   name,
   skipped,
@@ -49,6 +57,11 @@ export default function PersonCard({
 }: Props) {
   const [confirmFaceId, setConfirmFaceId] = useState<string | null>(null);
   const chipsTappable = canEject && !skipped;
+  // Expanding shows every face, not just the preview. Without it a wrongly
+  // grouped face at position 5+ was simply uncorrectable: eject only works on
+  // a face you can see, and only the first four were ever rendered.
+  const shown = expandedCrops ?? crops;
+  const hiddenCount = faceCount - crops.length;
 
   function tapChip(faceId: string) {
     if (!chipsTappable) return;
@@ -83,13 +96,19 @@ export default function PersonCard({
         {skipped ? "Skipped" : "Skip"}
       </button>
 
-      <div className="flex items-center gap-2">
-        {crops.map((crop) => (
+      {/* pr-14 keeps the wrapped face chips clear of the absolutely
+          positioned Skip button, which otherwise sits on top of them and
+          swallows the tap. */}
+      <div className="flex flex-wrap items-center gap-2 pr-14">
+        {shown.map((crop) => (
           <button
             key={crop.faceId}
             type="button"
             onClick={() => tapChip(crop.faceId)}
             disabled={!chipsTappable}
+            aria-label={
+              chipsTappable ? "Remove this face from this person" : "Face"
+            }
             className={`rounded-full transition-shadow ${
               confirmFaceId === crop.faceId
                 ? "ring-2 ring-red-400 ring-offset-1"
@@ -97,15 +116,24 @@ export default function PersonCard({
                   ? "hover:ring-2 hover:ring-neutral-300 hover:ring-offset-1"
                   : ""
             }`}
-            title={chipsTappable ? "Not this person? Tap to remove" : undefined}
           >
             <img
               src={crop.url}
-              alt="face"
+              alt=""
               className="h-14 w-14 rounded-full border border-neutral-100 object-cover"
             />
           </button>
         ))}
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            aria-expanded={expandedCrops != null}
+            className="h-14 rounded-full border border-dashed border-neutral-300 px-3 text-xs font-medium text-neutral-500 transition-colors hover:border-accent hover:text-accent"
+          >
+            {expandedCrops ? "Show fewer" : `+${hiddenCount} more`}
+          </button>
+        )}
       </div>
       <p className="mt-2 text-xs text-neutral-400">
         in {photoCount} photo{photoCount === 1 ? "" : "s"}
@@ -150,6 +178,11 @@ export default function PersonCard({
             type="text"
             value={name}
             placeholder="Add a name"
+            // A placeholder is not a label: it disappears on focus and isn't
+            // reliably announced. Names the person by photo count so multiple
+            // cards aren't all announced identically as "Add a name".
+            aria-label={`Name for the person in ${photoCount} photo${photoCount === 1 ? "" : "s"}`}
+            autoComplete="off"
             onChange={(e) => onChange(e.target.value)}
             onBlur={onPersist}
             className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none transition-colors focus:border-accent"

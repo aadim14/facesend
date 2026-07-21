@@ -10,17 +10,40 @@ export function sanitizeFilename(name: string, fallback = "person"): string {
   return cleaned.length > 0 ? cleaned : fallback;
 }
 
-/** Deduplicate filenames by appending -2, -3, ... before the extension. */
+/**
+ * Case- and unicode-insensitive key for filename collisions.
+ *
+ * NFC matters on macOS: the Photos app writes `café.jpg` decomposed (NFD)
+ * while most other sources write it composed. They are different JS strings
+ * but the same file on APFS, so without normalizing they'd both claim the
+ * same zip entry.
+ */
+function collisionKey(name: string): string {
+  return name.normalize("NFC").toLowerCase();
+}
+
+/**
+ * Deduplicate filenames by appending -2, -3, ... before the extension.
+ *
+ * Every name we hand out is claimed, including the generated ones — a set of
+ * originals like `a.jpg, a.jpg, a-2.jpg` would otherwise mint `a-2.jpg` for
+ * the second `a.jpg` and then hand the real `a-2.jpg` the same entry name,
+ * silently dropping one photo from the person's gallery on extraction.
+ */
 export function uniqueFilenames(names: string[]): string[] {
-  const seen = new Map<string, number>();
+  const claimed = new Set<string>();
   return names.map((name) => {
-    const key = name.toLowerCase();
-    const count = seen.get(key) ?? 0;
-    seen.set(key, count + 1);
-    if (count === 0) return name;
     const dot = name.lastIndexOf(".");
-    if (dot <= 0) return `${name}-${count + 1}`;
-    return `${name.slice(0, dot)}-${count + 1}${name.slice(dot)}`;
+    const [stem, ext] =
+      dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];
+
+    let candidate = name;
+    let n = 1;
+    while (claimed.has(collisionKey(candidate))) {
+      candidate = `${stem}-${++n}${ext}`;
+    }
+    claimed.add(collisionKey(candidate));
+    return candidate;
   });
 }
 

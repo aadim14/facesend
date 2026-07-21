@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { addPhoto, requestPersistence } from "@/lib/db";
-import { newId } from "@/lib/id";
-import { makeThumbnail } from "@/lib/images";
-
-const MAX_PHOTOS = 300;
+import { importPhotos, MAX_PHOTOS } from "@/lib/import";
 
 interface Props {
   onComplete: () => void;
@@ -86,61 +82,25 @@ export default function UploadStep({ onComplete }: Props) {
 
   async function handleFiles(fileList: FileList | File[]) {
     if (importing) return;
-    const all = Array.from(fileList);
-    const images = all.filter((f) => f.type.startsWith("image/"));
-    const kept = images.slice(0, MAX_PHOTOS);
-
-    const notices: string[] = [];
-    if (all.length - images.length > 0) {
-      notices.push(`${all.length - images.length} non-image file(s) skipped`);
-    }
-    if (images.length > MAX_PHOTOS) {
-      notices.push(`keeping the first ${MAX_PHOTOS} of ${images.length} photos`);
-    }
-
-    if (kept.length === 0) {
-      setNotice("Those files don't look like photos — try JPG or PNG images.");
-      return;
-    }
-
     setImporting(true);
-    setProgress({ done: 0, total: kept.length });
+    setNotice(null);
 
-    let imported = 0;
-    let unreadable = 0;
-    for (const file of kept) {
-      try {
-        const { thumbBlob, width, height } = await makeThumbnail(file);
-        await addPhoto({
-          id: newId(),
-          name: file.name,
-          blob: file,
-          thumbBlob,
-          width,
-          height,
-          faceCount: -1,
-        });
-        imported++;
-      } catch (err) {
-        console.warn(`[facesend] couldn't import ${file.name}:`, err);
-        unreadable++;
-      }
-      setProgress({ done: imported + unreadable, total: kept.length });
-    }
-
-    if (unreadable > 0) {
-      notices.push(`${unreadable} photo(s) couldn't be read and were skipped`);
-    }
+    const { imported, notices, storageFull } = await importPhotos(fileList, {
+      onProgress: setProgress,
+    });
 
     if (imported === 0) {
       setImporting(false);
       setNotice(
-        "None of those photos could be read in this browser. HEIC files work in Safari; try JPG or PNG elsewhere."
+        storageFull
+          ? "There's no room left in this browser's storage for these photos."
+          : notices.length > 0
+            ? notices.join(" · ")
+            : "None of those photos could be read in this browser. HEIC files work in Safari; try JPG or PNG elsewhere."
       );
       return;
     }
 
-    await requestPersistence();
     if (notices.length > 0) setNotice(notices.join(" · "));
     onComplete();
   }
@@ -153,7 +113,14 @@ export default function UploadStep({ onComplete }: Props) {
         <p className="text-sm font-medium">
           Importing {progress.done} / {progress.total}
         </p>
-        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-neutral-100">
+        <div
+          role="progressbar"
+          aria-valuenow={progress.done}
+          aria-valuemin={0}
+          aria-valuemax={progress.total}
+          aria-label="Importing photos"
+          className="h-1.5 w-64 overflow-hidden rounded-full bg-neutral-100"
+        >
           <div
             className="h-full rounded-full bg-accent transition-all"
             style={{ width: `${pct}%` }}
@@ -190,12 +157,13 @@ export default function UploadStep({ onComplete }: Props) {
           setDragActive(false);
           filesFromDrop(e.dataTransfer).then(handleFiles);
         }}
+        // Clicking anywhere in the zone is a convenience for pointer users.
+        // It is deliberately not role="button" + tabIndex: doing that made the
+        // whole zone one giant control with no accessible name, wrapped
+        // around a second nested control, which is invalid ARIA and announced
+        // as an unlabelled button. Keyboard and screen-reader users get the
+        // two real, named buttons inside instead.
         onClick={() => inputRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
-        }}
         className={`flex cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed px-6 py-20 transition-colors ${
           dragActive
             ? "border-accent bg-accent-soft"
@@ -216,29 +184,33 @@ export default function UploadStep({ onComplete }: Props) {
           />
         </svg>
         <p className="font-medium">Drag &amp; drop your event photos</p>
+        {/* Both options are real buttons. Previously "browse files" was a bare
+            span while "a whole folder" was a role="button" span, despite being
+            styled identically — so keyboard users could reach one and not the
+            other, with nothing to distinguish them visually. */}
         <p className="text-sm text-neutral-400">
           or{" "}
-          <span className="text-accent underline underline-offset-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              inputRef.current?.click();
+            }}
+            className="text-accent underline underline-offset-2 hover:opacity-80"
+          >
             browse files
-          </span>{" "}
+          </button>{" "}
           ·{" "}
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               folderInputRef.current?.click();
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.stopPropagation();
-                folderInputRef.current?.click();
-              }
-            }}
-            className="text-accent underline underline-offset-2"
+            className="text-accent underline underline-offset-2 hover:opacity-80"
           >
             a whole folder
-          </span>
+          </button>
         </p>
         <p className="mt-2 text-xs text-neutral-400">
           Up to {MAX_PHOTOS} photos · stays on this device

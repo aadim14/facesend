@@ -155,6 +155,14 @@ export async function buildBundle(
   photos: PhotoRecord[],
   opts: { size?: BundleSize } = {}
 ): Promise<Bundle> {
+  // An empty bundle is never something the host wants to hand someone: it
+  // produces a zip whose gallery reads "0 photos", and the caller had no way
+  // to tell that apart from a real delivery, so the card cheerfully showed
+  // "Downloaded ✓". Fail loudly instead of shipping an empty box.
+  if (photos.length === 0) {
+    throw new Error("Cannot build a gallery with no photos");
+  }
+
   const size = opts.size ?? "original";
   const names = bundlePhotoNames(photos);
 

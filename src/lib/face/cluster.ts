@@ -90,13 +90,30 @@ export function smartEjectSet(
 }
 
 /**
- * Upper bound for "might be the same person" merge suggestions: the
- * canonical face-recognition same-person threshold. Cluster pairs whose
- * centroids land between CLUSTER_THRESHOLD (our deliberately strict
- * auto-merge cutoff) and this value are exactly the under-merges the
- * strict threshold knowingly produces.
+ * Upper bound for "might be the same person" merge suggestions. Pairs whose
+ * centroids land between CLUSTER_THRESHOLD (our strict auto-merge cutoff) and
+ * this value are the under-merges that strictness knowingly produces.
+ *
+ * Was 0.6, the canonical same-person threshold — far too permissive as a
+ * *prompt* threshold. Measured over 22 faces from 6 unrelated group photos,
+ * where all 231 pairs are known different people:
+ *
+ *   band          false prompts
+ *   [0.40, 0.60)  23
+ *   [0.40, 0.50)   3
+ *   [0.40, 0.45)   1
+ *
+ * The closest different-person pair sat at 0.444, and only 1% of them fell
+ * below 0.494. At 0.6 the app asked "same person?" 23 times about 22 distinct
+ * people — noise that trains the host to dismiss the prompt without reading
+ * it, which costs more than the splits it was meant to catch.
+ *
+ * 0.5 keeps the near-misses (a true split that failed auto-merge sits just
+ * above 0.4) and drops ~87% of the false prompts. Recall matters less than
+ * precision here: a missed suggestion still leaves two cards the host can see
+ * and merge, whereas a wrong suggestion actively wastes their attention.
  */
-export const SUGGEST_THRESHOLD = 0.6;
+export const SUGGEST_THRESHOLD = 0.5;
 
 export interface MergeSuggestion {
   a: string;
@@ -132,6 +149,79 @@ export function suggestMerges(
     }
   }
   return out.sort((x, y) => x.distance - y.distance);
+}
+
+/**
+ * Fold host-confirmed same-person links into a clustering result.
+ *
+ * Clustering re-runs over every face whenever photos are added, so without
+ * this a merge the host explicitly confirmed is silently undone by the next
+ * run. Links are applied as a union-find over the produced clusters: any two
+ * clusters holding linked faces become one, transitively.
+ *
+ * Links naming faces that no longer exist (ejected, or their photo deleted)
+ * are ignored rather than treated as an error — the ledger is a set of hints
+ * about people, not a referential-integrity constraint.
+ */
+export function applyMergeLinks(
+  clusters: DescriptorCluster[],
+  links: [string, string][]
+): DescriptorCluster[] {
+  if (links.length === 0 || clusters.length < 2) return clusters;
+
+  const clusterOfFace = new Map<string, number>();
+  clusters.forEach((c, i) => c.faceIds.forEach((id) => clusterOfFace.set(id, i)));
+
+  const parent = clusters.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  const union = (i: number, j: number) => {
+    const a = find(i);
+    const b = find(j);
+    if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+  };
+
+  let joined = false;
+  for (const [a, b] of links) {
+    const ia = clusterOfFace.get(a);
+    const ib = clusterOfFace.get(b);
+    if (ia == null || ib == null || find(ia) === find(ib)) continue;
+    union(ia, ib);
+    joined = true;
+  }
+  if (!joined) return clusters;
+
+  const merged = new Map<number, DescriptorCluster[]>();
+  clusters.forEach((c, i) => {
+    const root = find(i);
+    merged.set(root, [...(merged.get(root) ?? []), c]);
+  });
+
+  return [...merged.values()]
+    .map((members) => {
+      const faceIds = members.flatMap((m) => m.faceIds);
+      // Weighted mean of the member centroids — the mean of the union, without
+      // needing the descriptors back. A centroid must describe the faces it
+      // ships with; carrying one member's centroid over would be a lie.
+      const centroid = new Float32Array(members[0].centroid.length);
+      for (const m of members) {
+        for (let i = 0; i < centroid.length; i++) {
+          centroid[i] += m.centroid[i] * m.faceIds.length;
+        }
+      }
+      for (let i = 0; i < centroid.length; i++) centroid[i] /= faceIds.length;
+      return { faceIds, centroid };
+    })
+    .sort(
+      (a, b) =>
+        b.faceIds.length - a.faceIds.length ||
+        a.faceIds[0].localeCompare(b.faceIds[0])
+    );
 }
 
 interface MutableCluster {
@@ -246,18 +336,52 @@ export function clusterDescriptors(
 
   // Pass 3: re-assign each face to its nearest final centroid. Recovers
   // borderline faces that greedily landed in a cluster whose centroid drifted.
+  //
+  // Two guards, with quite different track records:
+  //
+  //   - index < 0 fixes a *demonstrated* crash. It means every distance
+  //     compared false, which is what happens when a descriptor contains NaN
+  //     (a degenerate 1px crop, or a float16 WebGL readback). Pass 1 already
+  //     guarded this; pass 3 did not, so `reassigned[-1].push(...)` threw and
+  //     killed the run *after* every photo had been detected — the whole
+  //     session's work lost to a generic "something went wrong".
+  //
+  //   - `distance < threshold` is defence in depth, not a fixed bug. Pass 3
+  //     used to move every face to its globally nearest centroid regardless
+  //     of distance, which reads as a way to blend two people into one group.
+  //     A search over 20k randomised 128-d inputs found no case where it
+  //     actually changed the partition — a face's own centroid is essentially
+  //     always its nearest — so this is cheap insurance on an invariant the
+  //     file header claims, not a repair. Don't cite it as a bug fix.
   if (clusters.length > 1) {
     const byId = new Map(faces.map((f) => [f.faceId, f.descriptor]));
+    const home = new Map<string, number>();
+    clusters.forEach((c, i) => c.faceIds.forEach((id) => home.set(id, i)));
+
     const reassigned: string[][] = clusters.map(() => []);
     for (const face of faces) {
-      const { index } = nearestCluster(
-        byId.get(face.faceId)!,
-        clusters
-      );
-      reassigned[index].push(face.faceId);
+      const descriptor = byId.get(face.faceId)!;
+      const { index, distance } = nearestCluster(descriptor, clusters);
+      const target =
+        index >= 0 && distance < threshold
+          ? index
+          : (home.get(face.faceId) ?? -1);
+      if (target >= 0) reassigned[target].push(face.faceId);
     }
+
     for (let i = 0; i < clusters.length; i++) {
-      clusters[i] = { ...clusters[i], faceIds: reassigned[i] };
+      // Recompute the centroid: it has to describe the faces it ships with,
+      // or the result isn't a fixed point and any future consumer that trusts
+      // `centroid` reads a vector for a different set of faces.
+      const descriptors = reassigned[i]
+        .map((id) => byId.get(id))
+        .filter((d): d is Float32Array | number[] => d != null);
+      clusters[i] = {
+        faceIds: reassigned[i],
+        centroid: descriptors.length
+          ? meanDescriptor(descriptors)
+          : clusters[i].centroid,
+      };
     }
   }
 

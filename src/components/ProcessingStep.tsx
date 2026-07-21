@@ -7,13 +7,19 @@ import {
   addFaces,
   getAllFaces,
   getAllPhotos,
+  getClusters,
+  getMergeLinks,
   replaceClusters,
   setPhotoFaceCount,
 } from "@/lib/db";
 import { newId } from "@/lib/id";
 import { getActiveBackend, loadFaceApi } from "@/lib/face/models";
 import { detectFacesInPhoto } from "@/lib/face/detect";
-import { clusterDescriptors, IncrementalClusterer } from "@/lib/face/cluster";
+import {
+  applyMergeLinks,
+  clusterDescriptors,
+  IncrementalClusterer,
+} from "@/lib/face/cluster";
 import type { ClusterRecord } from "@/types";
 
 type Phase = "models" | "detecting" | "clustering";
@@ -167,33 +173,70 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
 
       setPhase("clustering");
       const faces = await getAllFaces();
-      const grouped = clusterDescriptors(
-        faces.map((f) => ({ faceId: f.id, descriptor: f.descriptor }))
+
+      // What the host already told us, keyed by face. Clustering runs over
+      // every face from scratch each time, so without this every previously
+      // typed name is destroyed by any re-run — adding a second batch of
+      // photos, or retrying a failed one, silently wiped the whole roster.
+      const priorClusters = await getClusters();
+      const priorById = new Map(priorClusters.map((c) => [c.id, c]));
+      const priorByFace = new Map(
+        faces
+          .filter((f) => f.clusterId)
+          .map((f) => [f.id, priorById.get(f.clusterId!)])
+      );
+
+      // Re-apply merges the host already confirmed. Clustering is stateless
+      // across runs, so without this every correction is undone the moment new
+      // photos arrive.
+      const grouped = applyMergeLinks(
+        clusterDescriptors(
+          faces.map((f) => ({ faceId: f.id, descriptor: f.descriptor }))
+        ),
+        await getMergeLinks()
       );
       const records: ClusterRecord[] = [];
       const assignments = new Map<string, string>();
       const recordById = new Map<string, ClusterRecord>();
       for (const group of grouped) {
+        // A regrouped cluster inherits from whichever prior person supplied
+        // most of its faces — a plurality vote, so one stray face migrating
+        // in can't rename someone. deliveredAt is deliberately not carried:
+        // the photo set changed, so a previous send no longer covers it.
+        const votes = new Map<string, number>();
+        for (const faceId of group.faceIds) {
+          const prior = priorByFace.get(faceId);
+          if (prior?.name) votes.set(prior.name, (votes.get(prior.name) ?? 0) + 1);
+        }
+        const inherited = [...votes.entries()].sort(
+          (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+        )[0]?.[0];
+
+        const skipped = group.faceIds.every(
+          (id) => priorByFace.get(id)?.skipped === true
+        );
+
         const record: ClusterRecord = {
           id: newId(),
-          name: "",
+          name: inherited ?? "",
           contact: {},
-          skipped: false,
+          skipped,
           deliveredAt: null,
         };
         records.push(record);
         recordById.set(record.id, record);
         for (const faceId of group.faceIds) assignments.set(faceId, record.id);
       }
-      // Carry names typed during processing into the final clusters: each
-      // name follows its anchor face into whichever cluster it ended up in.
+      // Names typed during *this* run win over inherited ones: they're the
+      // host's most recent intent. Each follows its anchor face into whichever
+      // cluster it ended up in.
       for (const [anchor, value] of Object.entries(namesRef.current)) {
         const name = value.trim();
         if (!name) continue;
         const clusterId = assignments.get(anchor);
         if (!clusterId) continue;
         const record = recordById.get(clusterId);
-        if (record && !record.name) record.name = name;
+        if (record) record.name = name;
       }
       await replaceClusters(records, assignments);
       onComplete();
@@ -250,7 +293,14 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
             </span>
           )}
         </p>
-        <div className="h-1.5 w-64 overflow-hidden rounded-full bg-neutral-100">
+        <div
+          role="progressbar"
+          aria-valuenow={phase === "detecting" ? progress.done : undefined}
+          aria-valuemin={0}
+          aria-valuemax={progress.total}
+          aria-label={PHASE_LABEL[phase]}
+          className="h-1.5 w-64 overflow-hidden rounded-full bg-neutral-100"
+        >
           <div
             className={`h-full rounded-full bg-accent transition-all ${
               phase !== "detecting" ? "animate-pulse" : ""
@@ -298,7 +348,7 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
                     <img
                       key={i}
                       src={url}
-                      alt="face"
+                      alt=""
                       className="h-10 w-10 rounded-full border border-neutral-100 object-cover"
                     />
                   ))}
@@ -310,6 +360,8 @@ export default function ProcessingStep({ onComplete, onEmpty }: Props) {
                   type="text"
                   value={names[card.anchor] ?? ""}
                   placeholder="Name (optional)"
+                  aria-label={`Name for the person appearing in ${card.count} photos`}
+                  autoComplete="off"
                   onChange={(e) => setName(card.anchor, e.target.value)}
                   className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-1.5 text-sm outline-none transition-colors focus:border-accent"
                 />

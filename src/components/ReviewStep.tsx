@@ -4,18 +4,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  addMergeLink,
   getAllFaces,
   getAllPhotos,
   getClusters,
   getFacesForCluster,
   getPhotosForCluster,
+  mergeClusters,
   putCluster,
   resetAll,
   retryFailedPhotos,
   splitCluster,
 } from "@/lib/db";
-import { smartEjectSet } from "@/lib/face/cluster";
+import { smartEjectSet, suggestMerges } from "@/lib/face/cluster";
+import type { MergeSuggestion } from "@/lib/face/cluster";
 import { newId } from "@/lib/id";
+import { importPhotos, MAX_PHOTOS } from "@/lib/import";
 import {
   deliverGallery,
   downloadGallery,
@@ -23,6 +27,7 @@ import {
   prepareGalleryFile,
 } from "@/lib/share";
 import PersonCard from "@/components/PersonCard";
+import MergePrompt from "@/components/MergePrompt";
 import type { ClusterRecord, PhotoRecord } from "@/types";
 
 interface PersonView {
@@ -49,8 +54,26 @@ export default function ReviewStep({ onRetry }: Props) {
   const [sharingId, setSharingId] = useState<string | null>(null);
   // Ephemeral per-session delivery outcome for the desktop download path
   // (a confirmed mobile share is persisted on the cluster as deliveredAt).
-  const [statuses, setStatuses] = useState<Record<string, "downloaded" | "error">>({});
+  const [statuses, setStatuses] = useState<
+    Record<string, "downloaded" | "error" | "missing">
+  >({});
   const [canShare, setCanShare] = useState(false);
+  const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([]);
+  const [merging, setMerging] = useState(false);
+  // Pairs the host has said "different people" to. Session-scoped on purpose:
+  // re-clustering after an eject can legitimately change the answer, and a
+  // rejected pair reappearing once is cheaper than storing a permanent no.
+  const [rejectedPairs, setRejectedPairs] = useState<Set<string>>(new Set());
+  const [photoTotal, setPhotoTotal] = useState(0);
+  const [adding, setAdding] = useState(false);
+  const [addNotice, setAddNotice] = useState<string | null>(null);
+  // Full face list for one expanded card; object URLs here are owned by
+  // toggleExpand and revoked as soon as the card collapses or another opens.
+  const [expanded, setExpanded] = useState<{
+    id: string;
+    crops: { faceId: string; url: string }[];
+  } | null>(null);
+  const addInputRef = useRef<HTMLInputElement>(null);
   const urlsRef = useRef<string[]>([]);
   // Pre-built gallery zips keyed by cluster id, so the Send tap can hand the
   // share sheet a ready File (preserving user activation on mobile). Warmed
@@ -116,7 +139,26 @@ export default function ReviewStep({ onRetry }: Props) {
         return { photo, url };
       });
 
+    // Pairs sitting in the band between our strict auto-merge cutoff and the
+    // canonical same-person threshold — i.e. exactly the splits the strict
+    // threshold knowingly creates. Skipped people are excluded; the host has
+    // already said they don't want a gallery for them.
+    setSuggestions(
+      suggestMerges(
+        views
+          .filter((v) => !v.cluster.skipped)
+          .map((v) => ({
+            clusterId: v.cluster.id,
+            descriptors: (byCluster.get(v.cluster.id) ?? []).map(
+              (f) => f.descriptor
+            ),
+          }))
+      )
+    );
+
+    setExpanded(null);
     setPeople(views);
+    setPhotoTotal(photos.length);
     setFailedCount(photos.filter((p) => p.faceCount === -2).length);
     setNoFacePhotos(noFaces);
     setNames((prev) => {
@@ -184,6 +226,80 @@ export default function ReviewStep({ onRetry }: Props) {
     await persistCluster(view, { skipped: !view.cluster.skipped });
   }
 
+  function pairKey(a: string, b: string): string {
+    return [a, b].sort().join("~");
+  }
+
+  /**
+   * Merge two cards that are the same person.
+   *
+   * The survivor is whichever card the host has already invested in: a typed
+   * name first, then the larger photo set. mergeClusters keeps the target's
+   * record, so choosing wrong would silently discard a name they typed.
+   */
+  async function acceptMerge(a: PersonView, b: PersonView) {
+    if (merging) return;
+    setMerging(true);
+    try {
+      const nameOf = (v: PersonView) =>
+        (names[v.cluster.id] ?? v.cluster.name).trim();
+      const [target, source] =
+        (nameOf(a) && !nameOf(b)) ||
+        (!!nameOf(a) === !!nameOf(b) && a.photoCount >= b.photoCount)
+          ? [a, b]
+          : [b, a];
+
+      // Persist the in-flight name first — mergeClusters writes the stored
+      // record, which wouldn't include a name still sitting in local state.
+      const name = nameOf(target);
+      if (name !== target.cluster.name) await persistCluster(target);
+
+      await mergeClusters(target.cluster.id, [source.cluster.id]);
+      // Record the decision against face ids, which survive re-clustering —
+      // otherwise the next run (adding photos, retrying a failure) silently
+      // splits these two apart again and re-asks the same question.
+      const anchorA = target.crops[0]?.faceId;
+      const anchorB = source.crops[0]?.faceId;
+      if (anchorA && anchorB) await addMergeLink(anchorA, anchorB);
+
+      galleryCache.current.delete(target.cluster.id); // photo set changed
+      galleryCache.current.delete(source.cluster.id);
+      await load();
+    } finally {
+      if (mounted.current) setMerging(false);
+    }
+  }
+
+  function rejectMerge(a: string, b: string) {
+    setRejectedPairs((prev) => new Set(prev).add(pairKey(a, b)));
+  }
+
+  /**
+   * Load every face in a group so any of them can be ejected.
+   *
+   * Fetched on demand rather than up front: creating an object URL per face
+   * for every person would pin every crop blob in memory for the whole
+   * session, and the overwhelming majority are never looked at.
+   */
+  async function toggleExpand(view: PersonView) {
+    const id = view.cluster.id;
+    if (expanded?.id === id) {
+      expanded.crops.forEach((c) => URL.revokeObjectURL(c.url));
+      setExpanded(null);
+      return;
+    }
+    expanded?.crops.forEach((c) => URL.revokeObjectURL(c.url));
+    const faces = await getFacesForCluster(id);
+    if (!mounted.current) return;
+    setExpanded({
+      id,
+      crops: faces.map((f) => ({
+        faceId: f.id,
+        url: URL.createObjectURL(f.cropBlob),
+      })),
+    });
+  }
+
   async function ejectFace(view: PersonView, faceId: string) {
     const faces = await getFacesForCluster(view.cluster.id);
     if (faces.length < 2) return;
@@ -203,7 +319,10 @@ export default function ReviewStep({ onRetry }: Props) {
     await load();
   }
 
-  function setStatus(id: string, value: "downloaded" | "error" | null) {
+  function setStatus(
+    id: string,
+    value: "downloaded" | "error" | "missing" | null
+  ) {
     setStatuses((prev) => {
       const next = { ...prev };
       if (value) next[id] = value;
@@ -237,6 +356,13 @@ export default function ReviewStep({ onRetry }: Props) {
         // Not warmed yet: building the zip now would burn the click's
         // activation, so download directly instead of failing the share sheet.
         const photos = await getPhotosForCluster(id);
+        if (photos.length === 0) {
+          // Faces still point at this cluster but their photos are gone —
+          // evicted storage, or a half-finished reset. Say so rather than
+          // handing over an empty zip and calling it delivered.
+          setStatus(id, "missing");
+          return;
+        }
         const file = await prepareGalleryFile(name, photos);
         galleryCache.current.set(id, { name, file });
         downloadGallery(file);
@@ -257,6 +383,37 @@ export default function ReviewStep({ onRetry }: Props) {
     else setRetrying(false);
   }
 
+  /**
+   * Add a second batch of photos to the event already in progress.
+   *
+   * Until now the only route out of this screen was startOver(), which
+   * deletes everything — so a host who took more photos, or who imported
+   * half the camera roll by mistake, had to re-run detection over the whole
+   * set and re-type every name. New photos land as unprocessed and
+   * ProcessingStep detects only those, then re-clusters; names and confirmed
+   * merges survive that (see the merge ledger and name inheritance).
+   */
+  async function addMorePhotos(fileList: FileList | File[]) {
+    if (adding) return;
+    setAdding(true);
+    try {
+      const { imported, notices, storageFull } = await importPhotos(fileList, {
+        budget: MAX_PHOTOS - photoTotal,
+      });
+      if (imported > 0) {
+        onRetry(); // -> processing, which picks up only the unprocessed photos
+        return;
+      }
+      setAddNotice(
+        storageFull
+          ? "There's no room left in this browser's storage."
+          : notices.join(" · ") || "Those files don't look like photos."
+      );
+    } finally {
+      if (mounted.current) setAdding(false);
+    }
+  }
+
   async function startOver() {
     if (!window.confirm("Delete all photos and people from this browser?")) return;
     await resetAll();
@@ -269,18 +426,57 @@ export default function ReviewStep({ onRetry }: Props) {
 
   function actionLabel(view: PersonView): string {
     if (sharingId === view.cluster.id) return canShare ? "Opening share…" : "Preparing…";
-    if (isDone(view)) return canShare ? "Sent ✓ · Send again" : "Downloaded ✓ · Again";
+    // "Shared", not "Sent": handing a file to the OS share sheet is all this
+    // app can observe. Whether the host actually completed the send in
+    // Messages is not reported back to the page, so claiming "Sent" asserts
+    // something we don't know.
+    if (isDone(view)) return canShare ? "Shared ✓ · Share again" : "Downloaded ✓ · Again";
     return canShare ? "Share their photos" : "Download their gallery";
   }
 
   function noteFor(view: PersonView): { note?: string; tone: "ok" | "error" | "neutral" } {
     const id = view.cluster.id;
     if (statuses[id] === "error") return { note: "Couldn't send — try again.", tone: "error" };
+    if (statuses[id] === "missing")
+      return {
+        note: "Their photos are missing from this browser — try reprocessing.",
+        tone: "error",
+      };
     if (statuses[id] === "downloaded")
       return { note: "Downloaded ✓ — now send it to them.", tone: "ok" };
     if (view.cluster.deliveredAt != null) return { tone: "ok" };
     return { tone: "neutral" };
   }
+
+  const atPhotoLimit = photoTotal >= MAX_PHOTOS;
+
+  /** Shared by the empty state and the footer — both need a way forward. */
+  const addPhotosControl = (
+    <>
+      <button
+        onClick={() => addInputRef.current?.click()}
+        disabled={adding || atPhotoLimit}
+        className="text-sm font-medium text-accent underline underline-offset-4 hover:opacity-80 disabled:opacity-40"
+      >
+        {adding
+          ? "Adding…"
+          : atPhotoLimit
+            ? `At the ${MAX_PHOTOS}-photo limit`
+            : "Add more photos"}
+      </button>
+      <input
+        ref={addInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files) addMorePhotos(e.target.files);
+          e.target.value = "";
+        }}
+      />
+    </>
+  );
 
   if (loading) {
     return (
@@ -330,10 +526,16 @@ export default function ReviewStep({ onRetry }: Props) {
             <p className="font-medium">No faces found in these photos</p>
             <p className="max-w-sm text-sm text-neutral-500">
               FaceSend groups photos by the people in them, and it couldn&apos;t spot
-              any faces here.
+              any faces in {photoTotal === 1 ? "this photo" : `these ${photoTotal} photos`}.
+              Adding shots where faces are larger or better lit usually helps.
             </p>
           </>
         )}
+        {/* This screen used to offer nothing but "Start over", which deletes
+            every imported photo — a dead end for the one case where the host
+            has the most to lose. */}
+        {addPhotosControl}
+        {addNotice && <p className="text-xs text-amber-600">{addNotice}</p>}
         <button
           onClick={startOver}
           className="text-sm text-neutral-400 underline underline-offset-4 hover:text-neutral-600"
@@ -343,6 +545,20 @@ export default function ReviewStep({ onRetry }: Props) {
       </div>
     );
   }
+
+  // Resolve suggestions against the current people list: a pair is live only
+  // if both cards still exist, neither is skipped, and the host hasn't already
+  // said they're different. One question at a time — a wall of "same person?"
+  // prompts is worse than the duplicates it's trying to fix.
+  const byId = new Map(people.map((p) => [p.cluster.id, p]));
+  const pendingSuggestions = suggestions
+    .filter((s) => !rejectedPairs.has(pairKey(s.a, s.b)))
+    .map((s) => ({ a: byId.get(s.a), b: byId.get(s.b), distance: s.distance }))
+    .filter(
+      (s): s is { a: PersonView; b: PersonView; distance: number } =>
+        s.a != null && s.b != null && !s.a.cluster.skipped && !s.b.cluster.skipped
+    );
+  const activeSuggestion = pendingSuggestions[0];
 
   const active = people.filter((p) => !p.cluster.skipped);
   const doneCount = active.filter((p) => isDone(p)).length;
@@ -366,7 +582,14 @@ export default function ReviewStep({ onRetry }: Props) {
 
       {/* progress */}
       <div className="mb-6">
-        <div className="h-2 overflow-hidden rounded-full bg-neutral-100">
+        <div
+          role="progressbar"
+          aria-valuenow={doneCount}
+          aria-valuemin={0}
+          aria-valuemax={active.length}
+          aria-label={canShare ? "People shared" : "Galleries downloaded"}
+          className="h-2 overflow-hidden rounded-full bg-neutral-100"
+        >
           <div
             className="h-full rounded-full bg-accent transition-all duration-500"
             style={{ width: `${pct}%` }}
@@ -396,6 +619,32 @@ export default function ReviewStep({ onRetry }: Props) {
         </div>
       )}
 
+      {activeSuggestion && (
+        <MergePrompt
+          a={{
+            name: names[activeSuggestion.a.cluster.id] ?? "",
+            photoCount: activeSuggestion.a.photoCount,
+            crops: activeSuggestion.a.crops,
+          }}
+          b={{
+            name: names[activeSuggestion.b.cluster.id] ?? "",
+            photoCount: activeSuggestion.b.photoCount,
+            crops: activeSuggestion.b.crops,
+          }}
+          remaining={pendingSuggestions.length}
+          working={merging}
+          onMerge={() =>
+            acceptMerge(activeSuggestion.a, activeSuggestion.b)
+          }
+          onDismiss={() =>
+            rejectMerge(
+              activeSuggestion.a.cluster.id,
+              activeSuggestion.b.cluster.id
+            )
+          }
+        />
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
         {people.map((view) => {
           const note = noteFor(view);
@@ -403,6 +652,11 @@ export default function ReviewStep({ onRetry }: Props) {
             <PersonCard
               key={view.cluster.id}
               crops={view.crops}
+              expandedCrops={
+                expanded?.id === view.cluster.id ? expanded.crops : null
+              }
+              faceCount={view.faceCount}
+              onToggleExpand={() => toggleExpand(view)}
               photoCount={view.photoCount}
               name={names[view.cluster.id] ?? ""}
               skipped={view.cluster.skipped}
@@ -449,10 +703,16 @@ export default function ReviewStep({ onRetry }: Props) {
         </div>
       )}
 
-      <div className="mt-12 text-center">
+      <div className="mt-12 flex flex-col items-center gap-3 text-center">
+        {addPhotosControl}
+        {addNotice && <p className="text-xs text-amber-600">{addNotice}</p>}
+        <p className="text-xs text-neutral-400">
+          {photoTotal} photo{photoTotal === 1 ? "" : "s"} in this event · names
+          and merges are kept when you add more
+        </p>
         <button
           onClick={startOver}
-          className="text-sm text-neutral-400 underline underline-offset-4 hover:text-neutral-600"
+          className="mt-2 text-sm text-neutral-400 underline underline-offset-4 hover:text-neutral-600"
         >
           Start over with new photos
         </button>
