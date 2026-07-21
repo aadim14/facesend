@@ -15,6 +15,11 @@ npm run dev
 
 Open http://localhost:3000.
 
+> If the app stalls on "This browser's storage isn't responding", another tab is holding the
+> database open — close other FaceSend tabs and reload. Chrome can also wedge an origin's
+> IndexedDB after an abandoned upgrade; `http://127.0.0.1:3000` is a separate origin and works
+> as an immediate escape hatch, and restarting the browser clears it.
+
 ```bash
 npm test         # unit tests (clustering, validation, geometry, data layer)
 npm run build    # production build
